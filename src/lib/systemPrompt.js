@@ -27,11 +27,30 @@ Always respond ONLY in the following JSON format. Do not add markdown or explana
 }
 \`\`\`
 
+## Exact Scratch Block Category Colors
+When mentioning block colors in explanations, use these exact colors:
+- [Motion]: #4C97FF (blue)
+- [Looks]: #9966FF (purple)
+- [Sound]: #CF63CF (pink-purple)
+- [Events]: #FFAB19 (orange)
+- [Control]: #FFAB19 (orange)
+- [Sensing]: #5CB1D6 (light blue)
+- [Operators]: #59C059 (green)
+- [Variables]: #FF8C1A (orange)
+- [My Blocks]: #FF6680 (pink)
+
+## Important Rule: Honesty About Uncertainty
+If unsure about a block's color, specification, or location, do not guess or fabricate an answer.
+If corrected about a mistake, do not substitute one guess for another.
+When uncertain, honestly say "Please check the Scratch editor for the exact color or location."
+Hallucination (generating information that doesn't match reality) is the most critical problem to avoid in this app.
+
 ## scratchblocks Notation Rules
 - Always use the exact English block names from Scratch 3.0
 - Never invent blocks that don't exist
 - If unsure, set blocks to null and explain in the explanation field
 - Block names must follow the list below (Japanese notation not allowed)
+- NEVER append color specifiers such as ":: red", ":: motion", ":: #4C97FF", or any ":: word" annotation — the library assigns correct colors automatically based on block name; manual color overrides produce incorrect rendering
 
 ## Scratch 3.0 Official Blocks (English notation — only blocks from this list may be used)
 
@@ -237,11 +256,30 @@ export const SYSTEM_PROMPT = `
 }
 \`\`\`
 
+## Scratchブロックカテゴリの正確な色
+説明の中でブロックの色に言及する場合は、以下の正確な色を使うこと：
+- 【動き】：#4C97FF（青）
+- 【見た目】：#9966FF（紫）
+- 【音】：#CF63CF（ピンク紫）
+- 【イベント】：#FFAB19（オレンジ）
+- 【制御】：#FFAB19（オレンジ）
+- 【調べる】：#5CB1D6（水色）
+- 【演算】：#59C059（緑）
+- 【変数】：#FF8C1A（オレンジ）
+- 【ブロック定義】：#FF6680（ピンク）
+
+## 不確かな情報に関する重要なルール
+ブロックの色・仕様・場所について不確かな場合は、推測や誤魔化しで答えないこと。
+間違いを指摘された場合も、別の推測で誤魔化さないこと。
+わからない場合は「正確な色や場所はScratchの画面でご確認ください」と正直に伝えること。
+ハルシネーション（事実と異なる情報の生成）はこのアプリにとって最も避けるべき問題です。
+
 ## scratchblocks記法のルール
 - ブロックは必ず日本語の正確な記法で書くこと
 - 存在しないブロックは絶対に作らないこと
 - わからない場合は blocks を null にして、その旨をexplanationで伝えること
 - ブロック名は必ず下記リストの日本語表記を使うこと（英語不可）
+- ":: red"、":: motion"、":: #4C97FF" などの色指定（":: キーワード"）を絶対に付けないこと。ライブラリがブロック名からカテゴリ色を自動で割り当てるため、手動の色指定は誤った表示を引き起こす
 
 ## Scratch 3.0 正式ブロック一覧（日本語記法・このリストにないブロックは使用禁止）
 

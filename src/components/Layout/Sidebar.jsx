@@ -143,7 +143,7 @@ const Sidebar = ({
         {/* Sidebar footer */}
         <div className="p-3 border-t border-gray-200">
           <p className="text-xs text-gray-400 text-center">
-            Scratteach v0.1.0
+            Scratteach v2.1.1
           </p>
         </div>
       </aside>
