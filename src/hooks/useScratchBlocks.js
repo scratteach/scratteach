@@ -17,19 +17,34 @@ for (const code of ['ja', 'ja-Hira']) {
   }
 }
 
+const extractObsoleteTexts = (svgEl) => {
+  const obsoleteEls = svgEl?.querySelectorAll('.sb3-obsolete');
+  if (!obsoleteEls?.length) return [];
+  return Array.from(obsoleteEls).map(el => {
+    // テキストノードを結合してブロック名を取得
+    const texts = Array.from(el.querySelectorAll('text'))
+      .map(t => t.textContent?.trim())
+      .filter(Boolean);
+    return texts.join(' ') || '(不明なブロック)';
+  });
+};
+
 export const useScratchBlocks = (code) => {
   const ref = useRef(null);
   const [isRendered, setIsRendered] = useState(false);
   const [renderError, setRenderError] = useState(null);
+  const [invalidBlocks, setInvalidBlocks] = useState([]);
 
   useEffect(() => {
     if (!code || !ref.current) {
       setIsRendered(false);
+      setInvalidBlocks([]);
       return;
     }
 
     setRenderError(null);
     setIsRendered(false);
+    setInvalidBlocks([]);
 
     try {
       ref.current.innerHTML = '';
@@ -42,6 +57,11 @@ export const useScratchBlocks = (code) => {
       svg.style.display = 'block';
 
       ref.current.appendChild(svg);
+
+      // レンダリング後に不正ブロック（sb3-obsolete）を検出
+      const found = extractObsoleteTexts(svg);
+      setInvalidBlocks(found);
+
       setIsRendered(true);
     } catch (err) {
       console.error('scratchblocks render error:', err);
@@ -49,5 +69,5 @@ export const useScratchBlocks = (code) => {
     }
   }, [code]);
 
-  return { ref, isRendered, renderError };
+  return { ref, isRendered, renderError, invalidBlocks };
 };

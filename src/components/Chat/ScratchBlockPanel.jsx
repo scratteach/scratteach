@@ -11,8 +11,39 @@ const LoadingSpinner = () => (
   </div>
 );
 
+const InvalidBlockWarning = ({ invalidBlocks }) => {
+  if (!invalidBlocks?.length) return null;
+  return (
+    <div className="mb-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+      <div className="flex items-start gap-2">
+        <span className="text-red-500 flex-shrink-0 mt-0.5">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" />
+            <path d="M8 5v3.5M8 10.5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-red-700">
+            赤いブロックが {invalidBlocks.length} 個あります
+          </p>
+          <p className="text-xs text-red-600 mt-0.5">
+            Scratchに存在しないブロックです。実際には組めません。
+          </p>
+          <ul className="mt-1.5 space-y-0.5">
+            {invalidBlocks.map((name, i) => (
+              <li key={i} className="text-xs text-red-700 bg-red-100 rounded px-2 py-0.5 font-mono truncate">
+                {name}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const ScratchBlockPanel = ({ code, title = 'ブロック' }) => {
-  const { ref, isRendered, renderError } = useScratchBlocks(code);
+  const { ref, isRendered, renderError, invalidBlocks } = useScratchBlocks(code);
 
   if (!code) {
     return (
@@ -35,12 +66,12 @@ const ScratchBlockPanel = ({ code, title = 'ブロック' }) => {
           {renderError}
         </div>
       )}
+      <InvalidBlockWarning invalidBlocks={invalidBlocks} />
       <div
         ref={ref}
         className="w-full overflow-x-auto"
         style={{ display: isRendered ? 'block' : 'none' }}
       />
-      {/* Fallback: show raw code */}
       {renderError && (
         <pre className="mt-2 text-xs bg-gray-100 rounded-lg p-3 overflow-x-auto text-gray-600 whitespace-pre-wrap">
           {code}
