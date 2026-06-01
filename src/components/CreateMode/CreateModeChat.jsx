@@ -64,7 +64,7 @@ const UserBubble = ({ message }) => (
   </div>
 );
 
-const AIBubble = ({ message, isLatest, onApprove, onModify, gameTitle }) => {
+const AIBubble = ({ message, isLatest, onApprove, onModify, gameTitle, isDesktop }) => {
   const parsed = message.parsed || {};
   const { phase, message: msg, question, spec, sprites } = parsed;
 
@@ -94,14 +94,12 @@ const AIBubble = ({ message, isLatest, onApprove, onModify, gameTitle }) => {
         )}
 
         {phase === 'summary' && (
-          <>
-            <SpecSummary
-              spec={spec}
-              onApprove={onApprove}
-              onModify={onModify}
-              isLatest={isLatest}
-            />
-          </>
+          <SpecSummary
+            spec={spec}
+            onApprove={onApprove}
+            onModify={onModify}
+            isLatest={isLatest}
+          />
         )}
 
         {phase === 'generating' && (
@@ -111,12 +109,20 @@ const AIBubble = ({ message, isLatest, onApprove, onModify, gameTitle }) => {
                 {formatText(msg)}
               </div>
             )}
-            <BlockDisplay
-              sprites={sprites}
-              spec={spec}
-              gameTitle={gameTitle}
-              onModifySpec={isLatest ? onModify : null}
-            />
+            {/* デスクトップ: 右パネルに表示中の案内のみ / モバイル: インライン表示 */}
+            {isDesktop ? (
+              <div className="bg-sky-50 border border-sky-200 rounded-xl px-4 py-3 text-sm text-sky-700 flex items-center gap-2">
+                <span>📐</span>
+                <span>ブロックを右パネルに表示しています</span>
+              </div>
+            ) : (
+              <BlockDisplay
+                sprites={sprites}
+                spec={spec}
+                gameTitle={gameTitle}
+                onModifySpec={isLatest ? onModify : null}
+              />
+            )}
           </>
         )}
 
@@ -190,11 +196,32 @@ const ErrorBanner = ({ error, onDismiss }) => {
   );
 };
 
+const BlockPanel = ({ sprites, spec, gameTitle, onModifySpec }) => {
+  if (!sprites || sprites.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-center px-6 py-12 text-gray-400">
+        <div className="text-4xl mb-3">📐</div>
+        <p className="text-sm">ゲームのブロックが生成されると<br />ここに表示されます</p>
+      </div>
+    );
+  }
+  return (
+    <BlockDisplay
+      sprites={sprites}
+      spec={spec}
+      gameTitle={gameTitle}
+      onModifySpec={onModifySpec}
+    />
+  );
+};
+
 const CreateModeChat = ({ onOpenSettings }) => {
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [sessionId, setSessionId] = useState(null);
+  const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 768);
+  const [sidePanelData, setSidePanelData] = useState(null);
   const messagesEndRef = useRef(null);
 
   const {
@@ -206,8 +233,28 @@ const CreateModeChat = ({ onOpenSettings }) => {
   } = useCreateSession();
 
   useEffect(() => {
+    const handleResize = () => setIsDesktop(window.innerWidth >= 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
+
+  // 最新のgeneratingメッセージを右パネルに自動反映
+  useEffect(() => {
+    const lastGenerating = [...messages]
+      .reverse()
+      .find(m => m.role === 'assistant' && m.parsed?.phase === 'generating');
+    if (lastGenerating) {
+      setSidePanelData({
+        sprites: lastGenerating.parsed.sprites,
+        spec: lastGenerating.parsed.spec,
+        isLatest: messages.indexOf(lastGenerating) === messages.map((m, i) => ({ m, i })).filter(({ m }) => m.role === 'assistant').at(-1)?.i,
+      });
+    }
+  }, [messages]);
 
   const handleResume = useCallback(() => {
     if (!latestInProgressSession) return;
@@ -330,6 +377,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
     setMessages([]);
     setSessionId(null);
     setError(null);
+    setSidePanelData(null);
   }, []);
 
   const lastAIIndex = messages.map((m, i) => ({ m, i })).filter(({ m }) => m.role === 'assistant').at(-1)?.i ?? -1;
@@ -339,55 +387,79 @@ const CreateModeChat = ({ onOpenSettings }) => {
   const isEmpty = messages.length === 0;
 
   return (
-    <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-      {!isEmpty && (
-        <div className="flex items-center justify-between px-4 py-2 border-b border-sky-100 bg-sky-50 no-print">
-          <span className="text-sm font-medium text-sky-700 truncate max-w-xs">
-            {messages[0]?.content?.slice(0, 40) || 'いっしょにつくるモード'}
-          </span>
-          <button
-            onClick={handleNewSession}
-            className="text-xs px-3 py-1.5 rounded-lg text-sky-600 hover:bg-sky-100 border border-sky-200 transition-colors"
-          >
-            + 新しく作る
-          </button>
-        </div>
-      )}
-
-      <div className="flex-1 overflow-y-auto px-4 py-4">
-        {isEmpty && !isLoading ? (
-          <WelcomeScreen
-            onResume={handleResume}
-            hasInProgress={!!latestInProgressSession}
-          />
-        ) : (
-          <>
-            {messages.map((message, index) => (
-              message.role === 'user'
-                ? <UserBubble key={index} message={message} />
-                : <AIBubble
-                    key={index}
-                    message={message}
-                    isLatest={index === lastAIIndex}
-                    onApprove={handleApprove}
-                    onModify={handleModify}
-                    gameTitle={gameTitle}
-                  />
-            ))}
-            {isLoading && <LoadingDots isChecking={isChecking} />}
-          </>
+    <div className="flex flex-1 overflow-hidden">
+      {/* チャットカラム */}
+      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+        {!isEmpty && (
+          <div className="flex items-center justify-between px-4 py-2 border-b border-sky-100 bg-sky-50 no-print">
+            <span className="text-sm font-medium text-sky-700 truncate max-w-xs">
+              {messages[0]?.content?.slice(0, 40) || 'いっしょにつくるモード'}
+            </span>
+            <button
+              onClick={handleNewSession}
+              className="text-xs px-3 py-1.5 rounded-lg text-sky-600 hover:bg-sky-100 border border-sky-200 transition-colors"
+            >
+              + 新しく作る
+            </button>
+          </div>
         )}
-        <div ref={messagesEndRef} />
+
+        <div className="flex-1 overflow-y-auto px-4 py-4">
+          {isEmpty && !isLoading ? (
+            <WelcomeScreen
+              onResume={handleResume}
+              hasInProgress={!!latestInProgressSession}
+            />
+          ) : (
+            <>
+              {messages.map((message, index) => (
+                message.role === 'user'
+                  ? <UserBubble key={index} message={message} />
+                  : <AIBubble
+                      key={index}
+                      message={message}
+                      isLatest={index === lastAIIndex}
+                      onApprove={handleApprove}
+                      onModify={handleModify}
+                      gameTitle={gameTitle}
+                      isDesktop={isDesktop}
+                    />
+              ))}
+              {isLoading && <LoadingDots isChecking={isChecking} />}
+            </>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        <ErrorBanner error={error} onDismiss={() => setError(null)} />
+
+        <InputBar
+          onSend={handleSend}
+          isLoading={isLoading}
+          isEmpty={isEmpty}
+          mode="create"
+        />
       </div>
 
-      <ErrorBanner error={error} onDismiss={() => setError(null)} />
-
-      <InputBar
-        onSend={handleSend}
-        isLoading={isLoading}
-        isEmpty={isEmpty}
-        mode="create"
-      />
+      {/* ブロックパネル（デスクトップのみ） */}
+      {isDesktop && (
+        <div className="w-80 lg:w-96 flex-shrink-0 border-l border-gray-200 bg-gray-50 flex flex-col">
+          <div className="px-4 py-3 border-b border-gray-200">
+            <h3 className="text-sm font-semibold text-gray-700">ブロック表示</h3>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {sidePanelData ? 'Scratchブロックプレビュー' : 'ブロック生成後に表示されます'}
+            </p>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4">
+            <BlockPanel
+              sprites={sidePanelData?.sprites}
+              spec={sidePanelData?.spec}
+              gameTitle={gameTitle}
+              onModifySpec={sidePanelData?.isLatest ? handleModify : null}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };
