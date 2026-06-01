@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import scratchblocks from 'scratchblocks';
 import ja from 'scratchblocks/locales/ja.json';
 import jaHira from 'scratchblocks/locales/ja-Hira.json';
+import { correctScratchBlocks } from '../lib/scratchBlocksCorrector.js';
 
 scratchblocks.loadLanguages({ ja, 'ja-Hira': jaHira });
 
@@ -48,7 +49,8 @@ export const useScratchBlocks = (code) => {
 
     try {
       ref.current.innerHTML = '';
-      const doc = scratchblocks.parse(code, { languages: ['ja', 'en'] });
+      const correctedCode = correctScratchBlocks(code);
+      const doc = scratchblocks.parse(correctedCode, { languages: ['ja', 'en'] });
       const svg = scratchblocks.render(doc, { style: 'scratch3', scale: 1 });
 
       svg.setAttribute('width', '100%');
