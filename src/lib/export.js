@@ -221,8 +221,10 @@ export const shareOrDownload = async (conversation) => {
   downloadAsHTML(html, filename);
 };
 
-export const printConversation = () => {
-  window.print();
+export const printConversation = async (elementId = 'question-mode-messages') => {
+  const { exportElementToPDF } = await import('./pdfExport.js');
+  const dateStr = new Date().toLocaleDateString('ja-JP');
+  await exportElementToPDF(elementId, `scratteach-conversation-${dateStr}.pdf`, `スクラッティーチ 会話ログ`);
 };
 
 const escapeHtml = (text) => {

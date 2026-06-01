@@ -1,7 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
 import ScratchBlockPanel from '../Chat/ScratchBlockPanel.jsx';
+import { captureElement } from '../../lib/pdfExport.js';
 
 const ChevronIcon = ({ isOpen }) => (
   <svg
@@ -19,61 +18,16 @@ const SpriteIcon = () => (
   </svg>
 );
 
+// ブロックエリアのみPNGで保存（📄↓ボタン）
 const exportBlockToPNG = async (spriteId, spriteName) => {
   const element = document.getElementById(`block-display-${spriteId}`);
   if (!element) return;
-  const canvas = await html2canvas(element, { scale: 0.6 });
+  const canvas = await captureElement(element);
+  if (!canvas) return;
   const link = document.createElement('a');
   link.download = `scratteach-${spriteName}.png`;
   link.href = canvas.toDataURL('image/png');
   link.click();
-};
-
-const exportAllToPDF = async (gameTitle, spec) => {
-  const element = document.getElementById('block-display-all');
-  if (!element) return;
-
-  const pdf = new jsPDF('p', 'mm', 'a4');
-  const pageWidth = pdf.internal.pageSize.getWidth();
-  const pageHeight = pdf.internal.pageSize.getHeight();
-
-  pdf.setFontSize(16);
-  pdf.text(`ゲーム名：${gameTitle}`, 15, 20);
-  pdf.setFontSize(10);
-  pdf.text(`作成日：${new Date().toLocaleDateString('ja-JP')}`, 15, 30);
-  pdf.line(15, 35, pageWidth - 15, 35);
-  pdf.setFontSize(12);
-  pdf.text('【決定した仕様】', 15, 45);
-  pdf.setFontSize(10);
-  let y = 55;
-  if (spec) {
-    Object.entries(spec).forEach(([key, value]) => {
-      const line = `・${key}：${value}`;
-      const lines = pdf.splitTextToSize(line, pageWidth - 30);
-      lines.forEach(l => {
-        if (y > pageHeight - 20) { pdf.addPage(); y = 20; }
-        pdf.text(l, 15, y);
-        y += 7;
-      });
-    });
-  }
-
-  pdf.addPage();
-  const canvas = await html2canvas(element, { scale: 0.6 });
-  const imgWidth = pageWidth - 20;
-  const totalImgHeight = (canvas.height * imgWidth) / canvas.width;
-  const pageContentHeight = pageHeight - 20;
-  let heightLeft = totalImgHeight;
-  let position = 10;
-  pdf.addImage(canvas, 'PNG', 10, position, imgWidth, totalImgHeight, '', 'FAST');
-  heightLeft -= pageContentHeight;
-  while (heightLeft > 0) {
-    pdf.addPage();
-    position -= pageContentHeight;
-    pdf.addImage(canvas, 'PNG', 10, position, imgWidth, totalImgHeight, '', 'FAST');
-    heightLeft -= pageContentHeight;
-  }
-  pdf.save(`scratteach-${gameTitle}.pdf`);
 };
 
 const SpriteSection = ({ sprite, spriteId, defaultOpen = false, onSpriteInvalidBlocks }) => {
@@ -131,7 +85,7 @@ const SpriteSection = ({ sprite, spriteId, defaultOpen = false, onSpriteInvalidB
   );
 };
 
-const BlockDisplay = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks }) => {
+const BlockDisplay = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks, onExportAll }) => {
   const [isExportingAll, setIsExportingAll] = useState(false);
 
   // スプライトが変わるたびに集計をリセット
@@ -165,8 +119,15 @@ const BlockDisplay = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks 
 
   const handleExportAll = async () => {
     setIsExportingAll(true);
-    await exportAllToPDF(title, spec);
-    setIsExportingAll(false);
+    try {
+      // 親から onExportAll が渡されていれば会話+ブロック全体PDF
+      // 渡されていなければブロックエリアのみPDF（フォールバック）
+      if (onExportAll) {
+        await onExportAll();
+      }
+    } finally {
+      setIsExportingAll(false);
+    }
   };
 
   return (

@@ -5,6 +5,7 @@ import BlockDisplay from './BlockDisplay.jsx';
 import { callGemini, parseCreateModeResponse, GeminiAPIError } from '../../lib/gemini.js';
 import { CREATE_MODE_SYSTEM_PROMPT } from '../../prompts/createModePrompt.js';
 import { useCreateSession } from '../../hooks/useCreateSession.js';
+import { exportChatAndBlocksToPDF } from '../../lib/pdfExport.js';
 
 const formatText = (text) => {
   if (!text) return null;
@@ -196,7 +197,7 @@ const ErrorBanner = ({ error, onDismiss }) => {
   );
 };
 
-const BlockPanel = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks, isAutoFixing }) => {
+const BlockPanel = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks, onExportAll, isAutoFixing }) => {
   if (!sprites || sprites.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center px-6 py-12 text-gray-400">
@@ -223,6 +224,7 @@ const BlockPanel = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks, i
         gameTitle={gameTitle}
         onModifySpec={onModifySpec}
         onInvalidBlocks={onInvalidBlocks}
+        onExportAll={onExportAll}
       />
     </div>
   );
@@ -452,6 +454,17 @@ const CreateModeChat = ({ onOpenSettings }) => {
     setSidePanelData(null);
   }, []);
 
+  const handleExportAll = useCallback(async () => {
+    const title = messages[0]?.content?.slice(0, 40) || 'ゲーム';
+    await exportChatAndBlocksToPDF({
+      chatElementId: 'create-mode-messages',
+      blocksElementId: 'block-display-all',
+      filename: `scratteach-${title}.pdf`,
+      gameTitle: title,
+      spec: sidePanelData?.spec,
+    });
+  }, [messages, sidePanelData]);
+
   const lastAIIndex = messages.map((m, i) => ({ m, i })).filter(({ m }) => m.role === 'assistant').at(-1)?.i ?? -1;
   const lastAIPhase = messages.filter(m => m.role === 'assistant').at(-1)?.parsed?.phase;
   const isChecking = isLoading && lastAIPhase === 'summary';
@@ -476,7 +489,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto px-4 py-4">
+        <div id="create-mode-messages" className="flex-1 overflow-y-auto px-4 py-4">
           {isEmpty && !isLoading ? (
             <WelcomeScreen
               onResume={handleResume}
@@ -534,6 +547,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
               gameTitle={gameTitle}
               onModifySpec={sidePanelData?.isLatest ? handleModify : null}
               onInvalidBlocks={sidePanelData?.isLatest ? handleAutoFix : null}
+              onExportAll={sidePanelData ? handleExportAll : null}
               isAutoFixing={isAutoFixing}
             />
           </div>
