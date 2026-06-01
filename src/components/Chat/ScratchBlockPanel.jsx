@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useScratchBlocks } from '../../hooks/useScratchBlocks.js';
 
 const LoadingSpinner = () => (
@@ -42,8 +42,14 @@ const InvalidBlockWarning = ({ invalidBlocks }) => {
   );
 };
 
-const ScratchBlockPanel = ({ code, title = 'ブロック' }) => {
+const ScratchBlockPanel = ({ code, title = 'ブロック', onInvalidBlocks }) => {
   const { ref, isRendered, renderError, invalidBlocks } = useScratchBlocks(code);
+
+  useEffect(() => {
+    if (isRendered && onInvalidBlocks) {
+      onInvalidBlocks(invalidBlocks);
+    }
+  }, [isRendered, invalidBlocks, onInvalidBlocks]);
 
   if (!code) {
     return (

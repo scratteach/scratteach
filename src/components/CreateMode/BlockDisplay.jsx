@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import ScratchBlockPanel from '../Chat/ScratchBlockPanel.jsx';
@@ -37,7 +37,6 @@ const exportAllToPDF = async (gameTitle, spec) => {
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
 
-  // Page 1: text summary
   pdf.setFontSize(16);
   pdf.text(`ゲーム名：${gameTitle}`, 15, 20);
   pdf.setFontSize(10);
@@ -52,41 +51,32 @@ const exportAllToPDF = async (gameTitle, spec) => {
       const line = `・${key}：${value}`;
       const lines = pdf.splitTextToSize(line, pageWidth - 30);
       lines.forEach(l => {
-        if (y > pageHeight - 20) {
-          pdf.addPage();
-          y = 20;
-        }
+        if (y > pageHeight - 20) { pdf.addPage(); y = 20; }
         pdf.text(l, 15, y);
         y += 7;
       });
     });
   }
 
-  // Page 2+: block canvas
   pdf.addPage();
-
   const canvas = await html2canvas(element, { scale: 0.6 });
   const imgWidth = pageWidth - 20;
   const totalImgHeight = (canvas.height * imgWidth) / canvas.width;
   const pageContentHeight = pageHeight - 20;
-
   let heightLeft = totalImgHeight;
   let position = 10;
-
   pdf.addImage(canvas, 'PNG', 10, position, imgWidth, totalImgHeight, '', 'FAST');
   heightLeft -= pageContentHeight;
-
   while (heightLeft > 0) {
     pdf.addPage();
     position -= pageContentHeight;
     pdf.addImage(canvas, 'PNG', 10, position, imgWidth, totalImgHeight, '', 'FAST');
     heightLeft -= pageContentHeight;
   }
-
   pdf.save(`scratteach-${gameTitle}.pdf`);
 };
 
-const SpriteSection = ({ sprite, spriteId, defaultOpen = false }) => {
+const SpriteSection = ({ sprite, spriteId, defaultOpen = false, onSpriteInvalidBlocks }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
   const [isExporting, setIsExporting] = useState(false);
 
@@ -96,6 +86,12 @@ const SpriteSection = ({ sprite, spriteId, defaultOpen = false }) => {
     await exportBlockToPNG(spriteId, sprite.name);
     setIsExporting(false);
   };
+
+  const handleInvalidBlocks = useCallback((blocks) => {
+    if (onSpriteInvalidBlocks) {
+      onSpriteInvalidBlocks(sprite.name, blocks);
+    }
+  }, [sprite.name, onSpriteInvalidBlocks]);
 
   return (
     <div className="border border-sky-200 rounded-xl overflow-hidden mb-3">
@@ -125,15 +121,43 @@ const SpriteSection = ({ sprite, spriteId, defaultOpen = false }) => {
           <p className="text-xs text-sky-600 bg-sky-50 rounded-lg px-3 py-2 mb-3 border border-sky-100">
             📌 {sprite.description}
           </p>
-          <ScratchBlockPanel code={sprite.blocks} />
+          <ScratchBlockPanel
+            code={sprite.blocks}
+            onInvalidBlocks={handleInvalidBlocks}
+          />
         </div>
       )}
     </div>
   );
 };
 
-const BlockDisplay = ({ sprites, spec, gameTitle, onModifySpec }) => {
+const BlockDisplay = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks }) => {
   const [isExportingAll, setIsExportingAll] = useState(false);
+
+  // スプライトが変わるたびに集計をリセット
+  const pendingRef = useRef({});
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    pendingRef.current = {};
+    clearTimeout(timerRef.current);
+  }, [sprites]);
+
+  const handleSpriteInvalidBlocks = useCallback((spriteName, blocks) => {
+    pendingRef.current[spriteName] = blocks;
+
+    // 300ms待って全スプライトの報告をまとめてから親に通知
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      if (!onInvalidBlocks) return;
+      const invalidList = Object.entries(pendingRef.current)
+        .filter(([, b]) => b.length > 0)
+        .map(([spriteName, blocks]) => ({ spriteName, blocks }));
+      if (invalidList.length > 0) {
+        onInvalidBlocks(invalidList);
+      }
+    }, 300);
+  }, [onInvalidBlocks]);
 
   if (!sprites || sprites.length === 0) return null;
 
@@ -173,6 +197,7 @@ const BlockDisplay = ({ sprites, spec, gameTitle, onModifySpec }) => {
             sprite={sprite}
             spriteId={i}
             defaultOpen={i === 0}
+            onSpriteInvalidBlocks={handleSpriteInvalidBlocks}
           />
         ))}
       </div>

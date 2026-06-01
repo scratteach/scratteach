@@ -196,7 +196,7 @@ const ErrorBanner = ({ error, onDismiss }) => {
   );
 };
 
-const BlockPanel = ({ sprites, spec, gameTitle, onModifySpec }) => {
+const BlockPanel = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks, isAutoFixing }) => {
   if (!sprites || sprites.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center px-6 py-12 text-gray-400">
@@ -206,23 +206,42 @@ const BlockPanel = ({ sprites, spec, gameTitle, onModifySpec }) => {
     );
   }
   return (
-    <BlockDisplay
-      sprites={sprites}
-      spec={spec}
-      gameTitle={gameTitle}
-      onModifySpec={onModifySpec}
-    />
+    <div className="relative">
+      {isAutoFixing && (
+        <div className="absolute inset-0 bg-white/80 z-10 flex flex-col items-center justify-center rounded-xl gap-2">
+          <div className="flex gap-1.5">
+            <span className="loading-dot-blue" />
+            <span className="loading-dot-blue" />
+            <span className="loading-dot-blue" />
+          </div>
+          <p className="text-sm text-sky-600 font-medium">🔧 赤いブロックを自動修正中...</p>
+        </div>
+      )}
+      <BlockDisplay
+        sprites={sprites}
+        spec={spec}
+        gameTitle={gameTitle}
+        onModifySpec={onModifySpec}
+        onInvalidBlocks={onInvalidBlocks}
+      />
+    </div>
   );
 };
+
+const MAX_AUTO_FIX_ATTEMPTS = 2;
 
 const CreateModeChat = ({ onOpenSettings }) => {
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isAutoFixing, setIsAutoFixing] = useState(false);
   const [error, setError] = useState(null);
   const [sessionId, setSessionId] = useState(null);
   const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 768);
   const [sidePanelData, setSidePanelData] = useState(null);
   const messagesEndRef = useRef(null);
+  const autoFixAttemptsRef = useRef(0);
+  const autoFixFiredRef = useRef(false);
+  const messagesRef = useRef(messages);
 
   const {
     latestInProgressSession,
@@ -241,6 +260,11 @@ const CreateModeChat = ({ onOpenSettings }) => {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
+
+  // messagesRefを常に最新に同期
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   // 最新のgeneratingメッセージを右パネルに自動反映
   useEffect(() => {
@@ -304,8 +328,56 @@ const CreateModeChat = ({ onOpenSettings }) => {
     }
   }, [onOpenSettings]);
 
+  const handleAutoFix = useCallback(async (invalidList) => {
+    if (autoFixFiredRef.current) return;
+    if (autoFixAttemptsRef.current >= MAX_AUTO_FIX_ATTEMPTS) return;
+
+    autoFixFiredRef.current = true;
+    autoFixAttemptsRef.current++;
+    setIsAutoFixing(true);
+
+    const details = invalidList
+      .map(({ spriteName, blocks }) =>
+        `・「${spriteName}」スプライト：${blocks.map(b => `「${b}」`).join('、')}`)
+      .join('\n');
+
+    const correctionText =
+      `【自動修正リクエスト】\n以下のスプライトにScratchに存在しないブロック（赤いブロック）が含まれていました：\n${details}\n\nScratch 3.0の公式ブロックのみを使い、generatingフェーズで全スプライトのブロックを修正してください。`;
+
+    try {
+      const result = await callAPI(correctionText, null, messagesRef.current);
+      if (result?.parsed?.phase === 'generating' && result.parsed.sprites) {
+        // チャット上は最新のgeneratingメッセージを上書き（新規追加しない）
+        setMessages(prev => {
+          const idx = [...prev].map((m, i) => ({ m, i }))
+            .filter(({ m }) => m.role === 'assistant' && m.parsed?.phase === 'generating')
+            .at(-1)?.i;
+          if (idx == null) return prev;
+          const updated = [...prev];
+          updated[idx] = { ...updated[idx], content: result.raw, parsed: result.parsed };
+          return updated;
+        });
+        setSidePanelData({
+          sprites: result.parsed.sprites,
+          spec: result.parsed.spec,
+          isLatest: true,
+        });
+        // 次のレンダリングで再チェックできるようfireフラグをリセット
+        autoFixFiredRef.current = false;
+      }
+    } catch (err) {
+      console.error('Auto-fix failed:', err);
+    } finally {
+      setIsAutoFixing(false);
+    }
+  }, [callAPI]);
+
   const handleSend = useCallback(async (text, imageData) => {
     if ((!text && !imageData) || isLoading) return;
+
+    // ユーザーが新しいメッセージを送ったら自動修正カウンターをリセット
+    autoFixAttemptsRef.current = 0;
+    autoFixFiredRef.current = false;
 
     const userMessage = {
       role: 'user',
@@ -445,7 +517,12 @@ const CreateModeChat = ({ onOpenSettings }) => {
       {isDesktop && (
         <div className="w-80 lg:w-96 flex-shrink-0 border-l border-gray-200 bg-gray-50 flex flex-col">
           <div className="px-4 py-3 border-b border-gray-200">
-            <h3 className="text-sm font-semibold text-gray-700">ブロック表示</h3>
+            <h3 className="text-sm font-semibold text-gray-700">
+              ブロック表示
+              {isAutoFixing && (
+                <span className="ml-2 text-xs font-normal text-sky-500">🔧 自動修正中...</span>
+              )}
+            </h3>
             <p className="text-xs text-gray-400 mt-0.5">
               {sidePanelData ? 'Scratchブロックプレビュー' : 'ブロック生成後に表示されます'}
             </p>
@@ -456,6 +533,8 @@ const CreateModeChat = ({ onOpenSettings }) => {
               spec={sidePanelData?.spec}
               gameTitle={gameTitle}
               onModifySpec={sidePanelData?.isLatest ? handleModify : null}
+              onInvalidBlocks={sidePanelData?.isLatest ? handleAutoFix : null}
+              isAutoFixing={isAutoFixing}
             />
           </div>
         </div>
