@@ -76,6 +76,33 @@ Including a custom block directly in the blocks field without prior explanation 
 - Block names must follow the list below (Japanese notation not allowed)
 - NEVER append color specifiers such as ":: red", ":: motion", ":: #4C97FF", or any ":: word" annotation — the library assigns correct colors automatically based on block name; manual color overrides produce incorrect rendering
 
+### scratchblocks Bracket Rules (violations cause red blocks)
+
+Bracket types and usage:
+- Variable / reporter  → (variable name)  e.g. (score) (player hand)
+- Number literal       → (number)         e.g. (1) (10)
+- String literal       → [string]         e.g. [rock] [Hello!]
+- Dropdown             → [option v] or (option v)  e.g. [left-right v]
+- Boolean / condition  → <condition>      e.g. <(x) = (0)>
+
+**Condition block syntax (critical)**
+
+❌ Wrong (no brackets → red block):
+\`\`\`
+if <player hand = rock and scra hand = scissors> then
+\`\`\`
+
+✅ Correct (variables in (), strings in [], whole condition in <>):
+\`\`\`
+if <<(player hand) = [rock]> and <(scra hand) = [scissors]>> then
+\`\`\`
+
+✅ Numeric comparison example:
+\`\`\`
+if <(scra hand) = (1)> then
+if <<(player hand) = (1)> and <(scra hand) = (2)>> then
+\`\`\`
+
 ## Scratch 3.0 Official Blocks (English notation — only blocks from this list may be used)
 
 ### [Motion]
@@ -330,6 +357,33 @@ export const SYSTEM_PROMPT = `
 - わからない場合は blocks を null にして、その旨をexplanationで伝えること
 - ブロック名は必ず下記リストの日本語表記を使うこと（英語不可）
 - ":: red"、":: motion"、":: #4C97FF" などの色指定（":: キーワード"）を絶対に付けないこと。ライブラリがブロック名からカテゴリ色を自動で割り当てるため、手動の色指定は誤った表示を引き起こす
+
+### scratchblocks 括弧ルール（必須・違反すると赤ブロックになる）
+
+括弧の種類と用途：
+・変数・レポーター → (変数名)　例：(スコア) (プレイヤーの手)
+・数値リテラル　　 → (数値)　　例：(1) (10)
+・文字列リテラル　 → [文字列]　例：[グー] [Hello!]
+・ドロップダウン　 → [選択肢 v] または (選択肢 v)　例：[左右のみ v]
+・真偽値（条件）　 → <条件>　　例：<(x) = (0)>
+
+**条件式の正しい記法（最重要）**
+
+❌ 間違い（括弧なし → 赤ブロック）：
+\`\`\`
+もし <プレイヤーの手 = グー かつ スクラの手 = チョキ> なら
+\`\`\`
+
+✅ 正しい（変数は ()、文字列は []、条件全体は <>）：
+\`\`\`
+もし <<(プレイヤーの手) = [グー]> かつ <(スクラの手) = [チョキ]>> なら
+\`\`\`
+
+✅ 数値比較の例：
+\`\`\`
+もし <(スクラの手) = (1)> なら
+もし <<(プレイヤーの手) = (1)> かつ <(スクラの手) = (2)>> なら
+\`\`\`
 
 ## Scratch 3.0 正式ブロック一覧（日本語記法・このリストにないブロックは使用禁止）
 
