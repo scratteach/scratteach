@@ -65,7 +65,7 @@ const UserBubble = ({ message }) => (
   </div>
 );
 
-const AIBubble = ({ message, isLatest, onApprove, onModify, gameTitle, isDesktop }) => {
+const AIBubble = ({ message, isLatest, onApprove, onModify, gameTitle, isDesktop, onInvalidBlocks }) => {
   const parsed = message.parsed || {};
   const { phase, message: msg, question, spec, sprites } = parsed;
 
@@ -122,6 +122,7 @@ const AIBubble = ({ message, isLatest, onApprove, onModify, gameTitle, isDesktop
                 spec={spec}
                 gameTitle={gameTitle}
                 onModifySpec={isLatest ? onModify : null}
+                onInvalidBlocks={isLatest ? onInvalidBlocks : null}
               />
             )}
           </>
@@ -230,7 +231,7 @@ const BlockPanel = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks, o
   );
 };
 
-const MAX_AUTO_FIX_ATTEMPTS = 2;
+const MAX_AUTO_FIX_ATTEMPTS = 3;
 
 const CreateModeChat = ({ onOpenSettings }) => {
   const [messages, setMessages] = useState([]);
@@ -344,7 +345,11 @@ const CreateModeChat = ({ onOpenSettings }) => {
       .join('\n');
 
     const correctionText =
-      `【自動修正リクエスト】\n以下のスプライトにScratchに存在しないブロック（赤いブロック）が含まれていました：\n${details}\n\nScratch 3.0の公式ブロックのみを使い、generatingフェーズで全スプライトのブロックを修正してください。`;
+      `【自動修正リクエスト】\n以下のスプライトにScratchに存在しないブロック（赤いブロック）が含まれていました：\n${details}\n\n` +
+      `赤ブロックの最も多い原因は「かつ」「または」を横に連鎖させた条件式です。\n` +
+      `条件式の中で「かつ」「または」を2回以上横につなげている箇所があれば、必ず「もし〜なら／でなければ」の入れ子（ネスト）に分解して書き直してください。\n` +
+      `特にじゃんけんの勝敗判定は「または」を一切使わず、入れ子のif-elseだけで全9パターンを表現してください。\n\n` +
+      `Scratch 3.0の公式ブロックのみを使い、generatingフェーズで全スプライトのブロックを修正してください。message には【Scratchで先に準備してください】ガイドを必ず含めること。`;
 
     try {
       const result = await callAPI(correctionText, null, messagesRef.current);
@@ -523,6 +528,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
                       onModify={handleModify}
                       gameTitle={gameTitle}
                       isDesktop={isDesktop}
+                      onInvalidBlocks={handleAutoFix}
                     />
               ))}
               {isLoading && <LoadingDots isChecking={isChecking} />}
