@@ -19,8 +19,8 @@ const SpriteIcon = () => (
 );
 
 // ブロックエリアのみPNGで保存（📄↓ボタン）
-const exportBlockToPNG = async (spriteId, spriteName) => {
-  const element = document.getElementById(`block-display-${spriteId}`);
+const exportBlockToPNG = async (elementId, spriteName) => {
+  const element = document.getElementById(elementId);
   if (!element) return;
   const canvas = await captureElement(element);
   if (!canvas) return;
@@ -30,14 +30,14 @@ const exportBlockToPNG = async (spriteId, spriteName) => {
   link.click();
 };
 
-const SpriteSection = ({ sprite, spriteId, defaultOpen = false, onSpriteInvalidBlocks, onRebuild, isRebuilding }) => {
+const SpriteSection = ({ sprite, blockId, defaultOpen = false, onSpriteInvalidBlocks, onRebuild, isRebuilding }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
   const [isExporting, setIsExporting] = useState(false);
 
   const handleExportPNG = async (e) => {
     e.stopPropagation();
     setIsExporting(true);
-    await exportBlockToPNG(spriteId, sprite.name);
+    await exportBlockToPNG(blockId, sprite.name);
     setIsExporting(false);
   };
 
@@ -72,7 +72,7 @@ const SpriteSection = ({ sprite, spriteId, defaultOpen = false, onSpriteInvalidB
 
       {/* 常にマウントして赤ブロック検出を有効にする。折りたたみ時はCSSで非表示 */}
       <div
-        id={`block-display-${spriteId}`}
+        id={blockId}
         className="px-4 py-3 bg-white"
         style={isOpen ? {} : { display: 'none' }}
       >
@@ -90,7 +90,7 @@ const SpriteSection = ({ sprite, spriteId, defaultOpen = false, onSpriteInvalidB
   );
 };
 
-const BlockDisplay = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks, onExportAll, onRebuild, isRebuilding }) => {
+const BlockDisplay = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks, onExportAll, onRebuild, isRebuilding, idPrefix = 'block-display', showExportButton = true }) => {
   const [isExportingAll, setIsExportingAll] = useState(false);
 
   // スプライトが変わるたびに集計をリセット
@@ -119,8 +119,6 @@ const BlockDisplay = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks,
   }, [onInvalidBlocks]);
 
   if (!sprites || sprites.length === 0) return null;
-
-  const title = gameTitle || spec?.['ゲームの種類'] || 'ゲーム';
 
   const handleExportAll = async () => {
     setIsExportingAll(true);
@@ -156,12 +154,12 @@ const BlockDisplay = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks,
         )}
       </div>
 
-      <div id="block-display-all" className="space-y-0">
+      <div id={`${idPrefix}-all`} className="space-y-0">
         {sprites.map((sprite, i) => (
           <SpriteSection
             key={i}
             sprite={sprite}
-            spriteId={i}
+            blockId={`${idPrefix}-${i}`}
             defaultOpen={i === 0}
             onSpriteInvalidBlocks={handleSpriteInvalidBlocks}
             onRebuild={onRebuild}
@@ -170,13 +168,15 @@ const BlockDisplay = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks,
         ))}
       </div>
 
-      <button
-        onClick={handleExportAll}
-        disabled={isExportingAll}
-        className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-sky-300 text-sky-700 bg-sky-50 hover:bg-sky-100 transition-colors text-sm font-medium disabled:opacity-50"
-      >
-        {isExportingAll ? '保存中...' : '📄 全部まとめてPDF保存'}
-      </button>
+      {showExportButton && (
+        <button
+          onClick={handleExportAll}
+          disabled={isExportingAll}
+          className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-sky-300 text-sky-700 bg-sky-50 hover:bg-sky-100 transition-colors text-sm font-medium disabled:opacity-50"
+        >
+          {isExportingAll ? '保存中...' : '📄 全部まとめてPDF保存'}
+        </button>
+      )}
     </div>
   );
 };

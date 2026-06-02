@@ -65,7 +65,7 @@ const UserBubble = ({ message }) => (
   </div>
 );
 
-const AIBubble = ({ message, isLatest, onApprove, onModify, gameTitle, isDesktop, onInvalidBlocks, onRebuild, isRebuilding }) => {
+const AIBubble = ({ message, isLatest, isLastGenerating, msgIndex, onApprove, onModify, gameTitle, isDesktop, onInvalidBlocks, onRebuild, onExportAll, isRebuilding }) => {
   const parsed = message.parsed || {};
   const { phase, message: msg, question, spec, sprites } = parsed;
 
@@ -121,9 +121,12 @@ const AIBubble = ({ message, isLatest, onApprove, onModify, gameTitle, isDesktop
                 sprites={sprites}
                 spec={spec}
                 gameTitle={gameTitle}
-                onModifySpec={isLatest ? onModify : null}
-                onInvalidBlocks={isLatest ? onInvalidBlocks : null}
-                onRebuild={isLatest ? onRebuild : null}
+                idPrefix={`bd-msg-${msgIndex}`}
+                showExportButton={isLastGenerating}
+                onModifySpec={isLastGenerating ? onModify : null}
+                onInvalidBlocks={isLastGenerating ? onInvalidBlocks : null}
+                onRebuild={isLastGenerating ? onRebuild : null}
+                onExportAll={isLastGenerating ? onExportAll : null}
                 isRebuilding={isRebuilding}
               />
             )}
@@ -200,8 +203,10 @@ const ErrorBanner = ({ error, onDismiss }) => {
   );
 };
 
-const BlockPanel = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks, onExportAll, isAutoFixing, onRebuild }) => {
-  if (!sprites || sprites.length === 0) {
+// 右パネル：これまでに生成された全てのブロックを生成順に積み重ねて表示する。
+// 最新の生成分だけが操作可能（赤ブロック検出・再構築・仕様修正）。過去分は読み取り専用。
+const BlockPanel = ({ generatingMessages, gameTitle, onModifySpec, onInvalidBlocks, onExportAll, isAutoFixing, onRebuild }) => {
+  if (!generatingMessages || generatingMessages.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center px-6 py-12 text-gray-400">
         <div className="text-4xl mb-3">📐</div>
@@ -209,6 +214,7 @@ const BlockPanel = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks, o
       </div>
     );
   }
+  const lastIdx = generatingMessages.length - 1;
   return (
     <div className="relative">
       {isAutoFixing && (
@@ -221,16 +227,32 @@ const BlockPanel = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks, o
           <p className="text-sm text-sky-600 font-medium">🔧 赤いブロックを自動修正中...</p>
         </div>
       )}
-      <BlockDisplay
-        sprites={sprites}
-        spec={spec}
-        gameTitle={gameTitle}
-        onModifySpec={onModifySpec}
-        onInvalidBlocks={onInvalidBlocks}
-        onExportAll={onExportAll}
-        onRebuild={onRebuild}
-        isRebuilding={isAutoFixing}
-      />
+      {/* 全生成分を1つのコンテナにまとめてPDFキャプチャ対象にする */}
+      <div id="block-display-all" className="space-y-4">
+        {generatingMessages.map((m, gi) => {
+          const isLast = gi === lastIdx;
+          return (
+            <BlockDisplay
+              key={gi}
+              sprites={m.parsed.sprites}
+              spec={m.parsed.spec}
+              gameTitle={gameTitle}
+              idPrefix={`bd-${gi}`}
+              showExportButton={false}
+              onModifySpec={isLast ? onModifySpec : null}
+              onInvalidBlocks={isLast ? onInvalidBlocks : null}
+              onRebuild={isLast ? onRebuild : null}
+              isRebuilding={isAutoFixing}
+            />
+          );
+        })}
+      </div>
+      <button
+        onClick={onExportAll}
+        className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-sky-300 text-sky-700 bg-sky-50 hover:bg-sky-100 transition-colors text-sm font-medium"
+      >
+        📄 全部まとめてPDF保存
+      </button>
     </div>
   );
 };
@@ -244,7 +266,6 @@ const CreateModeChat = ({ onOpenSettings }) => {
   const [error, setError] = useState(null);
   const [sessionId, setSessionId] = useState(null);
   const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 768);
-  const [sidePanelData, setSidePanelData] = useState(null);
   const messagesEndRef = useRef(null);
   const autoFixAttemptsRef = useRef(0);
   const autoFixFiredRef = useRef(false);
@@ -273,19 +294,11 @@ const CreateModeChat = ({ onOpenSettings }) => {
     messagesRef.current = messages;
   }, [messages]);
 
-  // 最新のgeneratingメッセージを右パネルに自動反映
-  useEffect(() => {
-    const lastGenerating = [...messages]
-      .reverse()
-      .find(m => m.role === 'assistant' && m.parsed?.phase === 'generating');
-    if (lastGenerating) {
-      setSidePanelData({
-        sprites: lastGenerating.parsed.sprites,
-        spec: lastGenerating.parsed.spec,
-        isLatest: messages.indexOf(lastGenerating) === messages.map((m, i) => ({ m, i })).filter(({ m }) => m.role === 'assistant').at(-1)?.i,
-      });
-    }
-  }, [messages]);
+  // 右パネルに積み重ねて表示する、全generatingメッセージ（生成された順）
+  const generatingMessages = messages.filter(
+    m => m.role === 'assistant' && m.parsed?.phase === 'generating' && m.parsed?.sprites?.length
+  );
+  const latestGenerating = generatingMessages.at(-1) || null;
 
   const handleResume = useCallback(() => {
     if (!latestInProgressSession) return;
@@ -354,11 +367,6 @@ const CreateModeChat = ({ onOpenSettings }) => {
         },
       };
       return updated;
-    });
-    setSidePanelData({
-      sprites: result.parsed.sprites,
-      spec: result.parsed.spec || originalSpec,
-      isLatest: true,
     });
   }, []);
 
@@ -500,7 +508,6 @@ const CreateModeChat = ({ onOpenSettings }) => {
     setMessages([]);
     setSessionId(null);
     setError(null);
-    setSidePanelData(null);
   }, []);
 
   const handleExportAll = useCallback(async () => {
@@ -510,11 +517,15 @@ const CreateModeChat = ({ onOpenSettings }) => {
       blocksElementId: 'block-display-all',
       filename: `scratteach-${title}.pdf`,
       gameTitle: title,
-      spec: sidePanelData?.spec,
+      spec: latestGenerating?.parsed?.spec,
     });
-  }, [messages, sidePanelData]);
+  }, [messages, latestGenerating]);
 
   const lastAIIndex = messages.map((m, i) => ({ m, i })).filter(({ m }) => m.role === 'assistant').at(-1)?.i ?? -1;
+  const lastGeneratingIndex = messages
+    .map((m, i) => ({ m, i }))
+    .filter(({ m }) => m.role === 'assistant' && m.parsed?.phase === 'generating' && m.parsed?.sprites?.length)
+    .at(-1)?.i ?? -1;
   const lastAIPhase = messages.filter(m => m.role === 'assistant').at(-1)?.parsed?.phase;
   const isChecking = isLoading && lastAIPhase === 'summary';
   const gameTitle = messages[0]?.content?.slice(0, 40) || 'ゲーム';
@@ -553,12 +564,15 @@ const CreateModeChat = ({ onOpenSettings }) => {
                       key={index}
                       message={message}
                       isLatest={index === lastAIIndex}
+                      isLastGenerating={index === lastGeneratingIndex}
+                      msgIndex={index}
                       onApprove={handleApprove}
                       onModify={handleModify}
                       gameTitle={gameTitle}
                       isDesktop={isDesktop}
                       onInvalidBlocks={handleAutoFix}
                       onRebuild={handleManualRebuild}
+                      onExportAll={handleExportAll}
                       isRebuilding={isAutoFixing}
                     />
               ))}
@@ -589,19 +603,18 @@ const CreateModeChat = ({ onOpenSettings }) => {
               )}
             </h3>
             <p className="text-xs text-gray-400 mt-0.5">
-              {sidePanelData ? 'Scratchブロックプレビュー' : 'ブロック生成後に表示されます'}
+              {latestGenerating ? 'Scratchブロックプレビュー' : 'ブロック生成後に表示されます'}
             </p>
           </div>
           <div className="flex-1 overflow-y-auto p-4">
             <BlockPanel
-              sprites={sidePanelData?.sprites}
-              spec={sidePanelData?.spec}
+              generatingMessages={generatingMessages}
               gameTitle={gameTitle}
-              onModifySpec={sidePanelData?.isLatest ? handleModify : null}
-              onInvalidBlocks={sidePanelData?.isLatest ? handleAutoFix : null}
-              onExportAll={sidePanelData ? handleExportAll : null}
+              onModifySpec={handleModify}
+              onInvalidBlocks={handleAutoFix}
+              onExportAll={handleExportAll}
               isAutoFixing={isAutoFixing}
-              onRebuild={sidePanelData?.isLatest ? handleManualRebuild : null}
+              onRebuild={handleManualRebuild}
             />
           </div>
         </div>
