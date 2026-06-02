@@ -65,7 +65,7 @@ const UserBubble = ({ message }) => (
   </div>
 );
 
-const AIBubble = ({ message, isLatest, onApprove, onModify, gameTitle, isDesktop, onInvalidBlocks }) => {
+const AIBubble = ({ message, isLatest, onApprove, onModify, gameTitle, isDesktop, onInvalidBlocks, onRebuild, isRebuilding }) => {
   const parsed = message.parsed || {};
   const { phase, message: msg, question, spec, sprites } = parsed;
 
@@ -123,6 +123,8 @@ const AIBubble = ({ message, isLatest, onApprove, onModify, gameTitle, isDesktop
                 gameTitle={gameTitle}
                 onModifySpec={isLatest ? onModify : null}
                 onInvalidBlocks={isLatest ? onInvalidBlocks : null}
+                onRebuild={isLatest ? onRebuild : null}
+                isRebuilding={isRebuilding}
               />
             )}
           </>
@@ -198,7 +200,7 @@ const ErrorBanner = ({ error, onDismiss }) => {
   );
 };
 
-const BlockPanel = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks, onExportAll, isAutoFixing }) => {
+const BlockPanel = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks, onExportAll, isAutoFixing, onRebuild }) => {
   if (!sprites || sprites.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center px-6 py-12 text-gray-400">
@@ -226,6 +228,8 @@ const BlockPanel = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks, o
         onModifySpec={onModifySpec}
         onInvalidBlocks={onInvalidBlocks}
         onExportAll={onExportAll}
+        onRebuild={onRebuild}
+        isRebuilding={isAutoFixing}
       />
     </div>
   );
@@ -318,18 +322,52 @@ const CreateModeChat = ({ onOpenSettings }) => {
       return { raw, parsed };
     } catch (err) {
       if (err instanceof GeminiAPIError) {
-        const otherModel = model === 'gemini-3.1-flash-lite' ? 'gemma-4-27b-it' : 'gemini-3.1-flash-lite';
-        let msg = err.message;
-        if (err.code === 'RATE_LIMIT') {
-          msg += `\n\n💡 設定画面で「${otherModel}」に切り替えることをお勧めします。`;
-        }
-        setError(msg);
+        setError(err.message);
       } else {
         setError(`予期しないエラーが発生しました: ${err.message}`);
       }
       return null;
     }
   }, [onOpenSettings]);
+
+  // 再構築結果を最新のgeneratingメッセージに反映（準備ガイドmessageとspecは保持）
+  const applyRebuildResult = useCallback((result) => {
+    const lastGenerating = [...messagesRef.current]
+      .reverse()
+      .find(m => m.role === 'assistant' && m.parsed?.phase === 'generating');
+    const originalMessage = lastGenerating?.parsed?.message;
+    const originalSpec = lastGenerating?.parsed?.spec;
+
+    setMessages(prev => {
+      const idx = [...prev].map((m, i) => ({ m, i }))
+        .filter(({ m }) => m.role === 'assistant' && m.parsed?.phase === 'generating')
+        .at(-1)?.i;
+      if (idx == null) return prev;
+      const updated = [...prev];
+      updated[idx] = {
+        ...updated[idx],
+        content: result.raw,
+        parsed: {
+          ...result.parsed,
+          message: originalMessage || result.parsed.message,
+          spec: result.parsed.spec || originalSpec,
+        },
+      };
+      return updated;
+    });
+    setSidePanelData({
+      sprites: result.parsed.sprites,
+      spec: result.parsed.spec || originalSpec,
+      isLatest: true,
+    });
+  }, []);
+
+  const REBUILD_INSTRUCTION =
+    `赤ブロックの最も多い原因は「かつ」「または」を横に連鎖させた条件式と、メッセージ名のブラケット記法漏れです。\n` +
+    `条件式で「かつ」「または」を2回以上横につなげている箇所は、必ず「もし〜なら／でなければ」の入れ子に分解してください。\n` +
+    `特にじゃんけんの勝敗判定は「または」を一切使わず、入れ子のif-elseだけで全9パターンを表現してください。\n` +
+    `メッセージ名は必ず [名前 v] のドロップダウン記法で書いてください。\n\n` +
+    `Scratch 3.0の公式デフォルトブロックのみを使い、generatingフェーズで全スプライトのブロックを作り直してください。message には【Scratchで先に準備してください】ガイドを必ず含めること。`;
 
   const handleAutoFix = useCallback(async (invalidList) => {
     if (autoFixFiredRef.current) return;
@@ -345,45 +383,12 @@ const CreateModeChat = ({ onOpenSettings }) => {
       .join('\n');
 
     const correctionText =
-      `【自動修正リクエスト】\n以下のスプライトにScratchに存在しないブロック（赤いブロック）が含まれていました：\n${details}\n\n` +
-      `赤ブロックの最も多い原因は「かつ」「または」を横に連鎖させた条件式です。\n` +
-      `条件式の中で「かつ」「または」を2回以上横につなげている箇所があれば、必ず「もし〜なら／でなければ」の入れ子（ネスト）に分解して書き直してください。\n` +
-      `特にじゃんけんの勝敗判定は「または」を一切使わず、入れ子のif-elseだけで全9パターンを表現してください。\n\n` +
-      `Scratch 3.0の公式ブロックのみを使い、generatingフェーズで全スプライトのブロックを修正してください。message には【Scratchで先に準備してください】ガイドを必ず含めること。`;
+      `【自動修正リクエスト】\n以下のスプライトにScratchに存在しないブロック（赤いブロック）が含まれていました：\n${details}\n\n${REBUILD_INSTRUCTION}`;
 
     try {
       const result = await callAPI(correctionText, null, messagesRef.current);
       if (result?.parsed?.phase === 'generating' && result.parsed.sprites) {
-        // 元のgeneratingメッセージからmessage（準備ガイド）とspecを保持
-        const lastGenerating = [...messagesRef.current]
-          .reverse()
-          .find(m => m.role === 'assistant' && m.parsed?.phase === 'generating');
-        const originalMessage = lastGenerating?.parsed?.message;
-        const originalSpec = lastGenerating?.parsed?.spec;
-
-        // チャット上は最新のgeneratingメッセージを上書き（新規追加しない）
-        setMessages(prev => {
-          const idx = [...prev].map((m, i) => ({ m, i }))
-            .filter(({ m }) => m.role === 'assistant' && m.parsed?.phase === 'generating')
-            .at(-1)?.i;
-          if (idx == null) return prev;
-          const updated = [...prev];
-          updated[idx] = {
-            ...updated[idx],
-            content: result.raw,
-            parsed: {
-              ...result.parsed,
-              message: originalMessage || result.parsed.message,
-              spec: result.parsed.spec || originalSpec,
-            },
-          };
-          return updated;
-        });
-        setSidePanelData({
-          sprites: result.parsed.sprites,
-          spec: result.parsed.spec || originalSpec,
-          isLatest: true,
-        });
+        applyRebuildResult(result);
         // 次のレンダリングで再チェックできるようfireフラグをリセット
         autoFixFiredRef.current = false;
       }
@@ -392,7 +397,31 @@ const CreateModeChat = ({ onOpenSettings }) => {
     } finally {
       setIsAutoFixing(false);
     }
-  }, [callAPI]);
+  }, [callAPI, applyRebuildResult]);
+
+  // 手動再構築（赤ブロックアラートの「再構築する」ボタン）
+  const handleManualRebuild = useCallback(async () => {
+    if (isAutoFixing || isLoading) return;
+    // 手動なので自動修正の試行カウンターをリセットして必ず実行する
+    autoFixAttemptsRef.current = 0;
+    autoFixFiredRef.current = true;
+    setIsAutoFixing(true);
+
+    const correctionText =
+      `【再構築リクエスト】\n表示中のブロックに、ブロック定義（デフォルトブロック）で作れない赤いブロックが含まれています。\n\n${REBUILD_INSTRUCTION}`;
+
+    try {
+      const result = await callAPI(correctionText, null, messagesRef.current);
+      if (result?.parsed?.phase === 'generating' && result.parsed.sprites) {
+        applyRebuildResult(result);
+      }
+    } catch (err) {
+      console.error('Manual rebuild failed:', err);
+    } finally {
+      autoFixFiredRef.current = false;
+      setIsAutoFixing(false);
+    }
+  }, [callAPI, applyRebuildResult, isAutoFixing, isLoading]);
 
   const handleSend = useCallback(async (text, imageData) => {
     if ((!text && !imageData) || isLoading) return;
@@ -529,6 +558,8 @@ const CreateModeChat = ({ onOpenSettings }) => {
                       gameTitle={gameTitle}
                       isDesktop={isDesktop}
                       onInvalidBlocks={handleAutoFix}
+                      onRebuild={handleManualRebuild}
+                      isRebuilding={isAutoFixing}
                     />
               ))}
               {isLoading && <LoadingDots isChecking={isChecking} />}
@@ -570,6 +601,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
               onInvalidBlocks={sidePanelData?.isLatest ? handleAutoFix : null}
               onExportAll={sidePanelData ? handleExportAll : null}
               isAutoFixing={isAutoFixing}
+              onRebuild={sidePanelData?.isLatest ? handleManualRebuild : null}
             />
           </div>
         </div>

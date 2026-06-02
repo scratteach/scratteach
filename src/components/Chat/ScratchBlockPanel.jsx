@@ -11,7 +11,7 @@ const LoadingSpinner = () => (
   </div>
 );
 
-const InvalidBlockWarning = ({ invalidBlocks }) => {
+const InvalidBlockWarning = ({ invalidBlocks, onRebuild, isRebuilding }) => {
   if (!invalidBlocks?.length) return null;
   return (
     <div className="mb-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
@@ -27,7 +27,9 @@ const InvalidBlockWarning = ({ invalidBlocks }) => {
             赤いブロックが {invalidBlocks.length} 個あります
           </p>
           <p className="text-xs text-red-600 mt-0.5">
-            Scratchに存在しないブロックです。実際には組めません。
+            {onRebuild
+              ? 'このままではブロック定義で作れないかもしれません。再構築しますか？'
+              : 'Scratchに存在しないブロックです。実際には組めません。'}
           </p>
           <ul className="mt-1.5 space-y-0.5">
             {invalidBlocks.map((name, i) => (
@@ -36,13 +38,26 @@ const InvalidBlockWarning = ({ invalidBlocks }) => {
               </li>
             ))}
           </ul>
+          {onRebuild && (
+            <button
+              onClick={onRebuild}
+              disabled={isRebuilding}
+              className="mt-2.5 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white text-xs font-medium transition-colors disabled:opacity-60"
+            >
+              {isRebuilding ? (
+                <>🔧 再構築中...</>
+              ) : (
+                <>🔄 再構築する</>
+              )}
+            </button>
+          )}
         </div>
       </div>
     </div>
   );
 };
 
-const ScratchBlockPanel = ({ code, title = 'ブロック', onInvalidBlocks }) => {
+const ScratchBlockPanel = ({ code, title = 'ブロック', onInvalidBlocks, onRebuild, isRebuilding }) => {
   const { ref, isRendered, renderError, invalidBlocks } = useScratchBlocks(code);
 
   useEffect(() => {
@@ -72,7 +87,7 @@ const ScratchBlockPanel = ({ code, title = 'ブロック', onInvalidBlocks }) =>
           {renderError}
         </div>
       )}
-      <InvalidBlockWarning invalidBlocks={invalidBlocks} />
+      <InvalidBlockWarning invalidBlocks={invalidBlocks} onRebuild={onRebuild} isRebuilding={isRebuilding} />
       <div
         ref={ref}
         className="w-full overflow-x-auto"

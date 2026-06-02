@@ -40,14 +40,7 @@ export const useGeminiChat = (onOpenSettings) => {
       };
     } catch (err) {
       if (err instanceof GeminiAPIError) {
-        let errorMessage = err.message;
-
-        if (err.code === 'RATE_LIMIT') {
-          const otherModel = model === 'gemini-3.1-flash-lite' ? 'gemma-4-27b-it' : 'gemini-3.1-flash-lite';
-          errorMessage += `\n\n💡 設定画面で「${otherModel}」に切り替えることをお勧めします。`;
-        }
-
-        setError(errorMessage);
+        setError(err.message);
       } else {
         setError(`予期しないエラーが発生しました: ${err.message}`);
       }

@@ -78,9 +78,17 @@ export const callGemini = async (messages, apiKey, model, blockLang = 'ja', syst
 
     if (response.status === 429) {
       throw new GeminiAPIError(
-        `リクエスト制限に達しました（レート制限）。しばらく待ってから再試行するか、設定画面でモデルを切り替えてください。\n詳細: ${errorMessage}`,
+        `AIサーバーが混み合っています。\n数分置いてから、メッセージ欄に「続き」と入力して送信してください。`,
         429,
         'RATE_LIMIT'
+      );
+    }
+
+    if (response.status === 503 || response.status === 500) {
+      throw new GeminiAPIError(
+        `AIサーバーが混み合っています。\n数分置いてから、メッセージ欄に「続き」と入力して送信してください。`,
+        response.status,
+        'SERVER_BUSY'
       );
     }
 
@@ -93,7 +101,7 @@ export const callGemini = async (messages, apiKey, model, blockLang = 'ja', syst
     }
 
     throw new GeminiAPIError(
-      `APIエラー (${response.status}): ${errorMessage}`,
+      `AIサーバーが混み合っているか、一時的なエラーが発生しました。\n数分置いてから、メッセージ欄に「続き」と入力して送信してください。`,
       response.status,
       'API_ERROR'
     );

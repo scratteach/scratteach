@@ -30,7 +30,7 @@ const exportBlockToPNG = async (spriteId, spriteName) => {
   link.click();
 };
 
-const SpriteSection = ({ sprite, spriteId, defaultOpen = false, onSpriteInvalidBlocks }) => {
+const SpriteSection = ({ sprite, spriteId, defaultOpen = false, onSpriteInvalidBlocks, onRebuild, isRebuilding }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
   const [isExporting, setIsExporting] = useState(false);
 
@@ -82,13 +82,15 @@ const SpriteSection = ({ sprite, spriteId, defaultOpen = false, onSpriteInvalidB
         <ScratchBlockPanel
           code={sprite.blocks}
           onInvalidBlocks={handleInvalidBlocks}
+          onRebuild={onRebuild}
+          isRebuilding={isRebuilding}
         />
       </div>
     </div>
   );
 };
 
-const BlockDisplay = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks, onExportAll }) => {
+const BlockDisplay = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks, onExportAll, onRebuild, isRebuilding }) => {
   const [isExportingAll, setIsExportingAll] = useState(false);
 
   // スプライトが変わるたびに集計をリセット
@@ -162,6 +164,8 @@ const BlockDisplay = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks,
             spriteId={i}
             defaultOpen={i === 0}
             onSpriteInvalidBlocks={handleSpriteInvalidBlocks}
+            onRebuild={onRebuild}
+            isRebuilding={isRebuilding}
           />
         ))}
       </div>
