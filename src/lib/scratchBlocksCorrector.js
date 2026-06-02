@@ -43,6 +43,36 @@ const COMPOUND_REPORTER_PATTERNS = [
   /^\(コスチュームの \[.+? v\]\)$/,
 ];
 
+// メッセージ名トークンを正しいドロップダウン記法 [名前 v] に正規化する
+// 例： 判定開始 → [判定開始 v] / (判定開始 v) → [判定開始 v] / [判定開始] → [判定開始 v]
+function toMessageDropdown(token) {
+  const t = token.trim();
+  let m = t.match(/^\[(.+?)\s+v\]$/);   // [x v]
+  if (m) return `[${m[1]} v]`;
+  m = t.match(/^\((.+?)\s+v\)$/);        // (x v)
+  if (m) return `[${m[1]} v]`;
+  m = t.match(/^\[(.+?)\]$/);            // [x]
+  if (m) return `[${m[1]} v]`;
+  return `[${t} v]`;                     // プレーンテキスト
+}
+
+// メッセージブロック（送る／送って待つ／受け取ったとき）のメッセージ名が
+// ドロップダウン記法 [名前 v] になっていない場合に補正する。
+// 記法のないプレーンテキスト名（例：「判定開始 を送る」）は赤ブロックになるため。
+// 長い接尾辞から順に判定すること（「を送って待つ」を「を送る」より先に）
+const MESSAGE_SUFFIXES = ['を送って待つ', 'を送る', 'を受け取ったとき'];
+
+function fixMessageBlock(line) {
+  for (const kw of MESSAGE_SUFFIXES) {
+    const re = new RegExp(`^(.+?)\\s*${kw}$`);
+    const match = line.match(re);
+    if (match) {
+      return `${toMessageDropdown(match[1])} ${kw}`;
+    }
+  }
+  return line;
+}
+
 // [変数 v] を VALUE にする  /  [変数 v] を VALUE ずつ変える
 // の VALUE が複合レポーターなら外側に () を追加
 function fixReporterInVariableBlock(line) {
@@ -103,9 +133,14 @@ export function correctScratchBlocks(code) {
     corrected = corrected.replace(wrong, right);
   }
 
-  // Step 2: 変数ブロック内のレポーター囲み忘れを修正（行ごと）
+  // Step 2: 行ごとの補正（メッセージ記法・変数ブロックのレポーター囲み忘れ）
   const lines = corrected.split('\n');
-  const fixedLines = lines.map(line => fixReporterInVariableBlock(line.trim()));
+  const fixedLines = lines.map(line => {
+    let l = line.trim();
+    l = fixMessageBlock(l);
+    l = fixReporterInVariableBlock(l);
+    return l;
+  });
   corrected = fixedLines.join('\n');
 
   return corrected;
