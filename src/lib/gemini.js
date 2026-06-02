@@ -58,7 +58,7 @@ export const callGemini = async (messages, apiKey, model, blockLang = 'ja', syst
         })),
         generationConfig: {
           temperature: 0.7,
-          maxOutputTokens: 2048,
+          maxOutputTokens: 8192,
         }
       })
     }

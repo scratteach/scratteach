@@ -82,6 +82,15 @@ const KNOWN_WRONG_BLOCKS = [
     wrong: /スプライトを隠す/g,
     right: '隠す',
   },
+  // 「と言う」「と考える」の引数順序が逆 (duration 秒 [text] と言う → [text] と (duration) 秒言う)
+  {
+    wrong: /\(([^()]+)\) 秒 \[([^\]]*)\] と言う/g,
+    right: '[$2] と ($1) 秒言う',
+  },
+  {
+    wrong: /\(([^()]+)\) 秒 \[([^\]]*)\] と考える/g,
+    right: '[$2] と ($1) 秒考える',
+  },
 ];
 
 export function correctScratchBlocks(code) {

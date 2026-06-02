@@ -70,17 +70,20 @@ const SpriteSection = ({ sprite, spriteId, defaultOpen = false, onSpriteInvalidB
         </span>
       </button>
 
-      {isOpen && (
-        <div id={`block-display-${spriteId}`} className="px-4 py-3 bg-white">
-          <p className="text-xs text-sky-600 bg-sky-50 rounded-lg px-3 py-2 mb-3 border border-sky-100">
-            📌 {sprite.description}
-          </p>
-          <ScratchBlockPanel
-            code={sprite.blocks}
-            onInvalidBlocks={handleInvalidBlocks}
-          />
-        </div>
-      )}
+      {/* 常にマウントして赤ブロック検出を有効にする。折りたたみ時はCSSで非表示 */}
+      <div
+        id={`block-display-${spriteId}`}
+        className="px-4 py-3 bg-white"
+        style={isOpen ? {} : { display: 'none' }}
+      >
+        <p className="text-xs text-sky-600 bg-sky-50 rounded-lg px-3 py-2 mb-3 border border-sky-100">
+          📌 {sprite.description}
+        </p>
+        <ScratchBlockPanel
+          code={sprite.blocks}
+          onInvalidBlocks={handleInvalidBlocks}
+        />
+      </div>
     </div>
   );
 };

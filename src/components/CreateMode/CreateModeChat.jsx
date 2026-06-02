@@ -349,6 +349,13 @@ const CreateModeChat = ({ onOpenSettings }) => {
     try {
       const result = await callAPI(correctionText, null, messagesRef.current);
       if (result?.parsed?.phase === 'generating' && result.parsed.sprites) {
+        // 元のgeneratingメッセージからmessage（準備ガイド）とspecを保持
+        const lastGenerating = [...messagesRef.current]
+          .reverse()
+          .find(m => m.role === 'assistant' && m.parsed?.phase === 'generating');
+        const originalMessage = lastGenerating?.parsed?.message;
+        const originalSpec = lastGenerating?.parsed?.spec;
+
         // チャット上は最新のgeneratingメッセージを上書き（新規追加しない）
         setMessages(prev => {
           const idx = [...prev].map((m, i) => ({ m, i }))
@@ -356,12 +363,20 @@ const CreateModeChat = ({ onOpenSettings }) => {
             .at(-1)?.i;
           if (idx == null) return prev;
           const updated = [...prev];
-          updated[idx] = { ...updated[idx], content: result.raw, parsed: result.parsed };
+          updated[idx] = {
+            ...updated[idx],
+            content: result.raw,
+            parsed: {
+              ...result.parsed,
+              message: originalMessage || result.parsed.message,
+              spec: result.parsed.spec || originalSpec,
+            },
+          };
           return updated;
         });
         setSidePanelData({
           sprites: result.parsed.sprites,
-          spec: result.parsed.spec,
+          spec: result.parsed.spec || originalSpec,
           isLatest: true,
         });
         // 次のレンダリングで再チェックできるようfireフラグをリセット
