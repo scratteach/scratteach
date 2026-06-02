@@ -73,6 +73,38 @@ function fixMessageBlock(line) {
   return line;
 }
 
+// 「もし <条件> ではないなら」という存在しない記法を修正する。
+// Scratchに「もし〜ではないなら」ブロックは無く、赤ブロックになる。
+// 正しくは【演算】の「ではない」で条件全体を包む：もし <<条件> ではない> なら
+// 「〜まで待つ」「〜まで繰り返す」の否定形も同様に補正する。
+function fixNegatedCondition(line) {
+  // 「もし <...>」で始まる行のみを対象にする（誤検出を避ける）
+  const head = line.match(/^もし\s+(<.*)$/);
+  if (!head) return line;
+  const rest = head[1];
+
+  // 先頭の <...> の対応する閉じ括弧を、入れ子を数えて探す
+  let depth = 0;
+  let end = -1;
+  for (let i = 0; i < rest.length; i++) {
+    if (rest[i] === '<') depth++;
+    else if (rest[i] === '>') {
+      depth--;
+      if (depth === 0) { end = i; break; }
+    }
+  }
+  if (end === -1) return line;
+
+  const cond = rest.slice(0, end + 1);          // <...>（バランスの取れた条件）
+  const after = rest.slice(end + 1).trim();      // 条件の後ろの残り
+
+  // 残りが「ではないなら」「ではない なら」「でないなら」「でない なら」なら否定形と判定
+  if (!/^(では|で)ない\s*なら$/.test(after)) return line;
+
+  // 条件全体を「ではない」演算子で包み、正しい「もし〜なら」にする
+  return `もし <${cond} ではない> なら`;
+}
+
 // [変数 v] を VALUE にする  /  [変数 v] を VALUE ずつ変える
 // の VALUE が複合レポーターなら外側に () を追加
 function fixReporterInVariableBlock(line) {
@@ -138,6 +170,7 @@ export function correctScratchBlocks(code) {
   const fixedLines = lines.map(line => {
     let l = line.trim();
     l = fixMessageBlock(l);
+    l = fixNegatedCondition(l);
     l = fixReporterInVariableBlock(l);
     return l;
   });
