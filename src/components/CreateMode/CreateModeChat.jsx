@@ -65,9 +65,9 @@ const UserBubble = ({ message }) => (
   </div>
 );
 
-const AIBubble = ({ message, isLatest, isLastGenerating, msgIndex, onApprove, onModify, gameTitle, isDesktop, onInvalidBlocks, onRebuild, onExportAll, isRebuilding }) => {
+const AIBubble = ({ message, isLatest, isLastGenerating, onApprove, onModify, gameTitle, isDesktop, onInvalidBlocks, onRebuild, onExportAll, isRebuilding, mergedSprites, mergedSpec }) => {
   const parsed = message.parsed || {};
-  const { phase, message: msg, question, spec, sprites } = parsed;
+  const { phase, message: msg, question, spec } = parsed;
 
   return (
     <div className="flex justify-start mb-4">
@@ -110,25 +110,26 @@ const AIBubble = ({ message, isLatest, isLastGenerating, msgIndex, onApprove, on
                 {formatText(msg)}
               </div>
             )}
-            {/* デスクトップ: 右パネルに表示中の案内のみ / モバイル: インライン表示 */}
-            {isDesktop ? (
-              <div className="bg-sky-50 border border-sky-200 rounded-xl px-4 py-3 text-sm text-sky-700 flex items-center gap-2">
-                <span>📐</span>
-                <span>ブロックを右パネルに表示しています</span>
-              </div>
-            ) : (
-              <BlockDisplay
-                sprites={sprites}
-                spec={spec}
-                gameTitle={gameTitle}
-                idPrefix={`bd-msg-${msgIndex}`}
-                showExportButton={isLastGenerating}
-                onModifySpec={isLastGenerating ? onModify : null}
-                onInvalidBlocks={isLastGenerating ? onInvalidBlocks : null}
-                onRebuild={isLastGenerating ? onRebuild : null}
-                onExportAll={isLastGenerating ? onExportAll : null}
-                isRebuilding={isRebuilding}
-              />
+            {/* ブロックは「現在の完成形（全スプライトを名前でまとめた1枚）」として
+                最新のgeneratingメッセージにだけ表示する。過去のgeneratingは案内文のみ。 */}
+            {isLastGenerating && (
+              isDesktop ? (
+                <div className="bg-sky-50 border border-sky-200 rounded-xl px-4 py-3 text-sm text-sky-700 flex items-center gap-2">
+                  <span>📐</span>
+                  <span>ブロックを右パネルに表示しています</span>
+                </div>
+              ) : (
+                <BlockDisplay
+                  sprites={mergedSprites}
+                  spec={mergedSpec}
+                  gameTitle={gameTitle}
+                  onModifySpec={onModify}
+                  onInvalidBlocks={onInvalidBlocks}
+                  onRebuild={onRebuild}
+                  onExportAll={onExportAll}
+                  isRebuilding={isRebuilding}
+                />
+              )
             )}
           </>
         )}
@@ -203,10 +204,10 @@ const ErrorBanner = ({ error, onDismiss }) => {
   );
 };
 
-// 右パネル：これまでに生成された全てのブロックを生成順に積み重ねて表示する。
-// 最新の生成分だけが操作可能（赤ブロック検出・再構築・仕様修正）。過去分は読み取り専用。
-const BlockPanel = ({ generatingMessages, gameTitle, onModifySpec, onInvalidBlocks, onExportAll, isAutoFixing, onRebuild }) => {
-  if (!generatingMessages || generatingMessages.length === 0) {
+// 右パネル：現在の完成形（全スプライトを名前でまとめた1枚）を表示する。
+// スプライトごとに常に1つだけ表示され、修正は各スプライト内で上書きされる。
+const BlockPanel = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks, onExportAll, isAutoFixing, onRebuild }) => {
+  if (!sprites || sprites.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center px-6 py-12 text-gray-400">
         <div className="text-4xl mb-3">📐</div>
@@ -214,7 +215,6 @@ const BlockPanel = ({ generatingMessages, gameTitle, onModifySpec, onInvalidBloc
       </div>
     );
   }
-  const lastIdx = generatingMessages.length - 1;
   return (
     <div className="relative">
       {isAutoFixing && (
@@ -224,37 +224,36 @@ const BlockPanel = ({ generatingMessages, gameTitle, onModifySpec, onInvalidBloc
             <span className="loading-dot-blue" />
             <span className="loading-dot-blue" />
           </div>
-          <p className="text-sm text-sky-600 font-medium">🔧 赤いブロックを自動修正中...</p>
+          <p className="text-sm text-sky-600 font-medium">🔧 ブロックを作り直しています...</p>
         </div>
       )}
-      {/* 全生成分を1つのコンテナにまとめてPDFキャプチャ対象にする */}
-      <div id="block-display-all" className="space-y-4">
-        {generatingMessages.map((m, gi) => {
-          const isLast = gi === lastIdx;
-          return (
-            <BlockDisplay
-              key={gi}
-              sprites={m.parsed.sprites}
-              spec={m.parsed.spec}
-              gameTitle={gameTitle}
-              idPrefix={`bd-${gi}`}
-              showExportButton={false}
-              onModifySpec={isLast ? onModifySpec : null}
-              onInvalidBlocks={isLast ? onInvalidBlocks : null}
-              onRebuild={isLast ? onRebuild : null}
-              isRebuilding={isAutoFixing}
-            />
-          );
-        })}
-      </div>
-      <button
-        onClick={onExportAll}
-        className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-sky-300 text-sky-700 bg-sky-50 hover:bg-sky-100 transition-colors text-sm font-medium"
-      >
-        📄 全部まとめてPDF保存
-      </button>
+      <BlockDisplay
+        sprites={sprites}
+        spec={spec}
+        gameTitle={gameTitle}
+        onModifySpec={onModifySpec}
+        onInvalidBlocks={onInvalidBlocks}
+        onExportAll={onExportAll}
+        onRebuild={onRebuild}
+        isRebuilding={isAutoFixing}
+      />
     </div>
   );
+};
+
+// generatingメッセージ群を「スプライト名をキーにした現在の完成形」へ畳み込む。
+// ・後の生成が同名スプライトを上書き（位置は初出順を維持）
+// ・新しい名前は末尾に追加
+// ・replaceAll フラグ付きの生成（クリーン再構築）はそこで一旦全消去してから積み直す
+const mergeGeneratingSprites = (genMsgs) => {
+  const map = new Map();
+  for (const m of genMsgs) {
+    if (m.parsed?.replaceAll) map.clear();
+    for (const s of (m.parsed?.sprites || [])) {
+      if (s && s.name) map.set(s.name, s);
+    }
+  }
+  return [...map.values()];
 };
 
 const MAX_AUTO_FIX_ATTEMPTS = 3;
@@ -294,11 +293,13 @@ const CreateModeChat = ({ onOpenSettings }) => {
     messagesRef.current = messages;
   }, [messages]);
 
-  // 右パネルに積み重ねて表示する、全generatingメッセージ（生成された順）
+  // 現在の完成形：全generatingメッセージをスプライト名でまとめた1枚
   const generatingMessages = messages.filter(
     m => m.role === 'assistant' && m.parsed?.phase === 'generating' && m.parsed?.sprites?.length
   );
   const latestGenerating = generatingMessages.at(-1) || null;
+  const mergedSprites = mergeGeneratingSprites(generatingMessages);
+  const mergedSpec = latestGenerating?.parsed?.spec || null;
 
   const handleResume = useCallback(() => {
     if (!latestInProgressSession) return;
@@ -344,7 +345,8 @@ const CreateModeChat = ({ onOpenSettings }) => {
   }, [onOpenSettings]);
 
   // 再構築結果を最新のgeneratingメッセージに反映（準備ガイドmessageとspecは保持）
-  const applyRebuildResult = useCallback((result) => {
+  // replaceAll=true のときは、それ以前の生成分を破棄して結果だけを残す（クリーン再構築）
+  const applyRebuildResult = useCallback((result, { replaceAll = false } = {}) => {
     const lastGenerating = [...messagesRef.current]
       .reverse()
       .find(m => m.role === 'assistant' && m.parsed?.phase === 'generating');
@@ -364,11 +366,20 @@ const CreateModeChat = ({ onOpenSettings }) => {
           ...result.parsed,
           message: originalMessage || result.parsed.message,
           spec: result.parsed.spec || originalSpec,
+          ...(replaceAll ? { replaceAll: true } : {}),
         },
       };
       return updated;
     });
   }, []);
+
+  // 現在の完成形に含まれるスプライト名（再構築リクエストでAIに全件返させるため）
+  const currentSpriteNames = () =>
+    mergeGeneratingSprites(
+      messagesRef.current.filter(
+        m => m.role === 'assistant' && m.parsed?.phase === 'generating' && m.parsed?.sprites?.length
+      )
+    ).map(s => s.name);
 
   const REBUILD_INSTRUCTION =
     `赤ブロックの最も多い原因は「かつ」「または」を横に連鎖させた条件式と、メッセージ名のブラケット記法漏れです。\n` +
@@ -390,8 +401,12 @@ const CreateModeChat = ({ onOpenSettings }) => {
         `・「${spriteName}」スプライト：${blocks.map(b => `「${b}」`).join('、')}`)
       .join('\n');
 
+    const names = currentSpriteNames();
+    const namesLine = names.length
+      ? `\n現在のスプライト：${names.join('、')}。\nこれらを同じ名前のままsprites[]に入れて返してください（修正のないスプライトも省略せず含める）。`
+      : '';
     const correctionText =
-      `【自動修正リクエスト】\n以下のスプライトにScratchに存在しないブロック（赤いブロック）が含まれていました：\n${details}\n\n${REBUILD_INSTRUCTION}`;
+      `【自動修正リクエスト】\n以下のスプライトにScratchに存在しないブロック（赤いブロック）が含まれていました：\n${details}${namesLine}\n\n${REBUILD_INSTRUCTION}`;
 
     try {
       const result = await callAPI(correctionText, null, messagesRef.current);
@@ -407,7 +422,8 @@ const CreateModeChat = ({ onOpenSettings }) => {
     }
   }, [callAPI, applyRebuildResult]);
 
-  // 手動再構築（赤ブロックアラートの「再構築する」ボタン）
+  // 手動再構築（「ブロックをまとめ直す」＝赤ブロック修正＋古い残骸の整理を兼ねるクリーン再構築）
+  // 現在のゲームに必要なスプライト一式をフル生成し、結果でまるごと置き換える（replaceAll）。
   const handleManualRebuild = useCallback(async () => {
     if (isAutoFixing || isLoading) return;
     // 手動なので自動修正の試行カウンターをリセットして必ず実行する
@@ -415,13 +431,17 @@ const CreateModeChat = ({ onOpenSettings }) => {
     autoFixFiredRef.current = true;
     setIsAutoFixing(true);
 
+    const names = currentSpriteNames();
+    const namesLine = names.length
+      ? `\n現在のスプライト：${names.join('、')}。\nこのゲームに今必要なスプライトだけを過不足なくsprites[]に含めてください（不要になったスプライトは含めない、新しく必要なら追加してよい）。`
+      : '';
     const correctionText =
-      `【再構築リクエスト】\n表示中のブロックに、ブロック定義（デフォルトブロック）で作れない赤いブロックが含まれています。\n\n${REBUILD_INSTRUCTION}`;
+      `【まとめ直しリクエスト】\n現在のブロックを最新の仕様できれいに作り直してください。赤いブロックや、古くなった・重複したスプライトがあれば整理してください。${namesLine}\n\n${REBUILD_INSTRUCTION}`;
 
     try {
       const result = await callAPI(correctionText, null, messagesRef.current);
       if (result?.parsed?.phase === 'generating' && result.parsed.sprites) {
-        applyRebuildResult(result);
+        applyRebuildResult(result, { replaceAll: true });
       }
     } catch (err) {
       console.error('Manual rebuild failed:', err);
@@ -565,7 +585,8 @@ const CreateModeChat = ({ onOpenSettings }) => {
                       message={message}
                       isLatest={index === lastAIIndex}
                       isLastGenerating={index === lastGeneratingIndex}
-                      msgIndex={index}
+                      mergedSprites={mergedSprites}
+                      mergedSpec={mergedSpec}
                       onApprove={handleApprove}
                       onModify={handleModify}
                       gameTitle={gameTitle}
@@ -599,16 +620,17 @@ const CreateModeChat = ({ onOpenSettings }) => {
             <h3 className="text-sm font-semibold text-gray-700">
               ブロック表示
               {isAutoFixing && (
-                <span className="ml-2 text-xs font-normal text-sky-500">🔧 自動修正中...</span>
+                <span className="ml-2 text-xs font-normal text-sky-500">🔧 作り直し中...</span>
               )}
             </h3>
             <p className="text-xs text-gray-400 mt-0.5">
-              {latestGenerating ? 'Scratchブロックプレビュー' : 'ブロック生成後に表示されます'}
+              {mergedSprites.length ? 'Scratchブロックプレビュー' : 'ブロック生成後に表示されます'}
             </p>
           </div>
           <div className="flex-1 overflow-y-auto p-4">
             <BlockPanel
-              generatingMessages={generatingMessages}
+              sprites={mergedSprites}
+              spec={mergedSpec}
               gameTitle={gameTitle}
               onModifySpec={handleModify}
               onInvalidBlocks={handleAutoFix}

@@ -168,6 +168,17 @@ const BlockDisplay = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks,
         ))}
       </div>
 
+      {onRebuild && (
+        <button
+          onClick={onRebuild}
+          disabled={isRebuilding}
+          className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors text-sm font-medium disabled:opacity-60"
+          title="赤いブロックや古くなったスプライトを整理して、現在の仕様できれいに作り直します"
+        >
+          {isRebuilding ? '🔧 作り直し中...' : '🔄 ブロックをまとめ直す'}
+        </button>
+      )}
+
       {showExportButton && (
         <button
           onClick={handleExportAll}
