@@ -105,6 +105,119 @@ function fixNegatedCondition(line) {
   return `もし <${cond} ではない> なら`;
 }
 
+// scratchblocksの比較演算子 < > は閉じ括弧 < > と紛らわしい。
+// 前後が空白の「 < 」「 > 」は比較演算子、それ以外は括弧として扱う。
+function bracketKind(s, i) {
+  const c = s[i];
+  if (c === '(' || c === '[') return 'open';
+  if (c === ')' || c === ']') return 'close';
+  if (c === '<') return (s[i - 1] === ' ' && s[i + 1] === ' ') ? null : 'open';
+  if (c === '>') return (s[i - 1] === ' ' && s[i + 1] === ' ') ? null : 'close';
+  return null;
+}
+
+// 括弧（()[]<>）の入れ子を考慮し、深さ0の位置にある区切り文字 sep で分割する
+function splitTopLevel(s, sep) {
+  const parts = [];
+  let depth = 0;
+  let last = 0;
+  for (let i = 0; i < s.length; i++) {
+    const k = bracketKind(s, i);
+    if (k === 'open') depth++;
+    else if (k === 'close') depth--;
+    else if (depth === 0 && s.startsWith(sep, i)) {
+      parts.push(s.slice(last, i));
+      i += sep.length - 1;
+      last = i + 1;
+    }
+  }
+  parts.push(s.slice(last));
+  return parts;
+}
+
+// 文字列全体がちょうど1組の <...> で包まれているか
+function isWrappedGroup(s) {
+  if (bracketKind(s, 0) !== 'open' || s[0] !== '<') return false;
+  if (bracketKind(s, s.length - 1) !== 'close' || s[s.length - 1] !== '>') return false;
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    const k = bracketKind(s, i);
+    if (k === 'open') depth++;
+    else if (k === 'close') {
+      depth--;
+      if (depth === 0 && i < s.length - 1) return false; // 末尾より前で閉じた
+    }
+  }
+  return depth === 0;
+}
+
+// ブール条件式を正規化する。
+// Scratchの「かつ」「または」は2入力ブロックなので、3つ以上を横に並べた
+// <A または B または C> は赤ブロックになる。これを左結合の入れ子
+// <<A または B> または C> に組み直す（「または」を優先度低として先に分解）。
+// 比較に <> が付いていない場合（A かつ B）は各項を <> で包む。
+function normalizeBool(expr) {
+  expr = expr.trim();
+
+  // 全体が1組の <> で包まれている場合、中身に演算子があれば剥がして処理
+  if (isWrappedGroup(expr)) {
+    const inner = expr.slice(1, -1);
+    const innerHasOp =
+      splitTopLevel(inner, ' または ').length > 1 ||
+      splitTopLevel(inner, ' かつ ').length > 1;
+    if (!innerHasOp) return expr; // <(a) = [b]> や <(a) ではない> などの単体はそのまま
+    expr = inner;
+  }
+
+  // 「または」（優先度低）→「かつ」の順で上位の演算子から分解し、左結合で入れ子化
+  for (const op of [' または ', ' かつ ']) {
+    const parts = splitTopLevel(expr, op);
+    if (parts.length > 1) {
+      let acc = normalizeBool(parts[0]);
+      for (let i = 1; i < parts.length; i++) {
+        acc = `<${acc}${op}${normalizeBool(parts[i])}>`;
+      }
+      return acc;
+    }
+  }
+
+  // 演算子なしの単体条件。<> で包まれていなければ包む
+  return isWrappedGroup(expr) ? expr : `<${expr}>`;
+}
+
+// 1行内のトップレベルの <...> ブール条件をすべて正規化する。
+// 「かつ」「または」を3つ以上横連鎖させた赤ブロックを、デフォルトの
+// かつ／または ブロックの入れ子に組み直して赤ブロックを防ぐ。
+function fixChainedBoolean(line) {
+  if (!line.includes(' かつ ') && !line.includes(' または ')) return line;
+
+  let out = '';
+  let i = 0;
+  while (i < line.length) {
+    if (line[i] === '<' && bracketKind(line, i) === 'open') {
+      // 対応する閉じ < > を入れ子を数えて探す
+      let depth = 0;
+      let j = i;
+      for (; j < line.length; j++) {
+        const k = bracketKind(line, j);
+        if (k === 'open') depth++;
+        else if (k === 'close') {
+          depth--;
+          if (depth === 0) break;
+        }
+      }
+      if (j < line.length && depth === 0) {
+        out += normalizeBool(line.slice(i, j + 1));
+        i = j + 1;
+        continue;
+      }
+    }
+    out += line[i];
+    i++;
+  }
+  return out;
+}
+
 // [変数 v] を VALUE にする  /  [変数 v] を VALUE ずつ変える
 // の VALUE が複合レポーターなら外側に () を追加
 function fixReporterInVariableBlock(line) {
@@ -171,6 +284,7 @@ export function correctScratchBlocks(code) {
     let l = line.trim();
     l = fixMessageBlock(l);
     l = fixNegatedCondition(l);
+    l = fixChainedBoolean(l);
     l = fixReporterInVariableBlock(l);
     return l;
   });
