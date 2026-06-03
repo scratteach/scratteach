@@ -104,7 +104,7 @@ const AIMessage = ({ message, messageIndex, activeIndex, onSetActiveIndex, isDes
 
   return (
     <div className="flex justify-start mb-4">
-      <div className="w-full max-w-[90%]">
+      <div className="w-full max-w-[90%] min-w-0">
         {/* Avatar + name */}
         <div className="flex items-center gap-2 mb-2">
           <div className="w-6 h-6 rounded-full bg-orange-500 flex items-center justify-center">

@@ -51,14 +51,14 @@ const SpriteSection = ({ sprite, blockId, defaultOpen = false, onSpriteInvalidBl
     <div className="border border-sky-200 rounded-xl overflow-hidden mb-3">
       <button
         onClick={() => setIsOpen(v => !v)}
-        className="flex items-center justify-between w-full px-4 py-3 bg-sky-50 hover:bg-sky-100 transition-colors text-sm font-medium text-sky-700 cursor-pointer"
+        className="flex items-center justify-between gap-2 w-full px-4 py-3 bg-sky-50 hover:bg-sky-100 transition-colors text-sm font-medium text-sky-700 cursor-pointer"
         aria-expanded={isOpen}
       >
-        <span className="flex items-center gap-2">
-          <SpriteIcon />
-          【{sprite.name}】のブロック
+        <span className="flex items-center gap-2 min-w-0">
+          <span className="flex-shrink-0"><SpriteIcon /></span>
+          <span className="truncate">【{sprite.name}】のブロック</span>
         </span>
-        <span className="flex items-center gap-2">
+        <span className="flex items-center gap-2 flex-shrink-0">
           <span
             onClick={handleExportPNG}
             className="text-xs px-2 py-0.5 rounded border border-sky-300 text-sky-600 bg-white hover:bg-sky-50 transition-colors cursor-pointer"
@@ -135,19 +135,19 @@ const BlockDisplay = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks,
 
   return (
     <div className="mb-3">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <div className="w-5 h-5 rounded-full bg-sky-400 flex items-center justify-center">
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-5 h-5 rounded-full bg-sky-400 flex items-center justify-center flex-shrink-0">
             <span className="text-white text-xs font-bold">S</span>
           </div>
-          <span className="text-sm font-semibold text-sky-700">
+          <span className="text-sm font-semibold text-sky-700 truncate">
             生成されたブロック（{sprites.length}スプライト）
           </span>
         </div>
         {onModifySpec && (
           <button
             onClick={onModifySpec}
-            className="text-xs px-3 py-1.5 rounded-lg border border-sky-200 text-sky-600 bg-sky-50 hover:bg-sky-100 transition-colors"
+            className="text-xs px-3 py-1.5 rounded-lg border border-sky-200 text-sky-600 bg-sky-50 hover:bg-sky-100 transition-colors flex-shrink-0"
           >
             仕様を修正する
           </button>

@@ -71,7 +71,7 @@ const AIBubble = ({ message, isLatest, isLastGenerating, onApprove, onModify, ga
 
   return (
     <div className="flex justify-start mb-4">
-      <div className="w-full max-w-[90%]">
+      <div className="w-full max-w-[90%] min-w-0">
         <div className="flex items-center gap-2 mb-2">
           <div className="w-6 h-6 rounded-full bg-sky-400 flex items-center justify-center">
             <span className="text-white text-xs font-bold">S</span>
