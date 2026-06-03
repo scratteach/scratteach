@@ -53,7 +53,20 @@ export const useScratchBlocks = (code) => {
       const doc = scratchblocks.parse(correctedCode, { languages: ['ja', 'en'] });
       const svg = scratchblocks.render(doc, { style: 'scratch3', scale: 1 });
 
-      svg.setAttribute('width', '100%');
+      // viewBoxだけを頼りにコンテナ幅へスケールさせる。
+      // width/height属性を残すとSafari(WebKit)はそれを固有サイズとして使い、
+      // height:auto指定があっても縮小せずネイティブ幅のまま描画してはみ出す。
+      // 属性を消してCSSのみでサイズを決めると、Chrome/Firefox/Safariすべてで
+      // viewBoxの縦横比を保ったままコンテナ幅に収まる。
+      const vb = svg.getAttribute('viewBox');
+      if (vb) {
+        svg.removeAttribute('width');
+        svg.removeAttribute('height');
+      } else {
+        // 念のためviewBoxが無い場合は従来どおり幅100%で対応
+        svg.setAttribute('width', '100%');
+      }
+      svg.style.width = '100%';
       svg.style.maxWidth = '100%';
       svg.style.height = 'auto';
       svg.style.display = 'block';
