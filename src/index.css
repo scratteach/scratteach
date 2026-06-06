@@ -11,6 +11,16 @@
     @apply bg-white text-gray-800 antialiased;
   }
 
+  /* iOS Safari等で、万一中身が画面幅を超えてもページ全体が横にはみ出さない安全網。
+     ブロックSVGはviewBox＋CSSで縮小して収まるが、想定外に広い要素が出ても
+     ここで横方向のあふれを断ち切り、レイアウト全体のズレ・横スクロールを防ぐ。 */
+  html,
+  body,
+  #root {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
   * {
     box-sizing: border-box;
   }
