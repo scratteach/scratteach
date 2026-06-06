@@ -27,13 +27,14 @@
 }
 
 @layer components {
+  /* ブロック表示エリア：ブロックは固定サイズで描き、はみ出しは横スクロールで見る。
+     -webkit-overflow-scrolling でiOSの慣性スクロールを有効化。 */
   .scratch-block-container {
     @apply w-full overflow-x-auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .scratch-block-container svg {
-    max-width: 100%;
-    height: auto;
     display: block;
   }
 
