@@ -103,7 +103,7 @@ const SettingsModal = ({ isOpen, onClose }) => {
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder="AIza..."
-                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent font-mono"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 pr-10 text-base md:text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent font-mono"
               />
               <button
                 type="button"

@@ -123,7 +123,7 @@ const InputBar = ({ onSend, isLoading, isEmpty, mode = 'question', placeholder, 
           placeholder={placeholder || defaultPlaceholder}
           disabled={isLoading}
           rows={1}
-          className="flex-1 bg-transparent border-none outline-none resize-none text-sm text-gray-800 placeholder-gray-400 max-h-40 py-1"
+          className="flex-1 bg-transparent border-none outline-none resize-none text-base md:text-sm text-gray-800 placeholder-gray-400 max-h-40 py-1"
           style={{ minHeight: '24px' }}
         />
         <button
