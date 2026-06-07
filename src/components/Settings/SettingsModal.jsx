@@ -6,6 +6,20 @@ const CloseIcon = () => (
   </svg>
 );
 
+const ExternalLinkIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M6 3H3.5A1.5 1.5 0 0 0 2 4.5v8A1.5 1.5 0 0 0 3.5 14h8a1.5 1.5 0 0 0 1.5-1.5V10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    <path d="M9.5 2.5H13.5V6.5M13 3L7.5 8.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+const ChevronIcon = ({ open }) => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"
+    className={`transition-transform ${open ? 'rotate-180' : ''}`}>
+    <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 const EyeIcon = ({ show }) => (
   show ? (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -39,6 +53,7 @@ const SettingsModal = ({ isOpen, onClose }) => {
   const [model, setModel] = useState('gemini-3.1-flash-lite');
   const [blockLang, setBlockLang] = useState('ja');
   const [showKey, setShowKey] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
@@ -115,17 +130,39 @@ const SettingsModal = ({ isOpen, onClose }) => {
               </button>
             </div>
             <p className="mt-2 text-xs text-gray-500">
-              APIキーをお持ちでない方は{' '}
-              <a
-                href="https://aistudio.google.com/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-orange-500 hover:text-orange-600 underline"
-              >
-                Google AI Studio
-              </a>{' '}
-              から無料で取得できます。
+              APIキーはGoogleが<span className="font-medium text-gray-600">無料</span>で発行できます（クレジットカード不要）。
             </p>
+
+            {/* APIキー取得ボタン */}
+            <a
+              href="https://aistudio.google.com/app/apikey"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 inline-flex w-full items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-orange-300 bg-orange-50 text-orange-600 hover:bg-orange-100 transition-colors text-sm font-medium"
+            >
+              Google AI StudioでAPIキーを取得
+              <ExternalLinkIcon />
+            </a>
+
+            {/* 取得手順（開閉式） */}
+            <button
+              type="button"
+              onClick={() => setShowGuide((v) => !v)}
+              className="mt-2 flex items-center justify-between w-full text-xs text-gray-500 hover:text-gray-700 transition-colors"
+              aria-expanded={showGuide}
+            >
+              <span>APIキーの取得方法（手順）を見る</span>
+              <ChevronIcon open={showGuide} />
+            </button>
+            {showGuide && (
+              <ol className="mt-2 space-y-1.5 text-xs text-gray-600 bg-gray-50 rounded-lg p-3 list-decimal list-inside">
+                <li>上の「Google AI StudioでAPIキーを取得」ボタンを押す</li>
+                <li>Googleアカウントでログインする</li>
+                <li>「APIキーを作成（Create API key）」をクリックする</li>
+                <li><span className="font-mono">AIza…</span> で始まるキーが表示されたらコピーする</li>
+                <li>この画面の入力欄に貼り付けて「保存する」を押す</li>
+              </ol>
+            )}
           </div>
 
           {/* Model Selection */}
