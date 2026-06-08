@@ -1,4 +1,5 @@
 import React from 'react';
+import { version as APP_VERSION } from '../../../package.json';
 
 const PlusIcon = () => (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -143,7 +144,7 @@ const Sidebar = ({
         {/* Sidebar footer */}
         <div className="p-3 border-t border-gray-200">
           <p className="text-xs text-gray-400 text-center">
-            Scratteach v2.1.1
+            Scratteach v{APP_VERSION}
           </p>
         </div>
       </aside>
