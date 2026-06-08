@@ -5,7 +5,7 @@ import BlockDisplay from './BlockDisplay.jsx';
 import { callGemini, parseCreateModeResponse, GeminiAPIError } from '../../lib/gemini.js';
 import { CREATE_MODE_SYSTEM_PROMPT } from '../../prompts/createModePrompt.js';
 import { useCreateSession } from '../../hooks/useCreateSession.js';
-import { exportChatAndBlocksToPDF } from '../../lib/pdfExport.js';
+import { exportSessionToPDF } from '../../lib/pdfExport.js';
 
 const formatText = (text) => {
   if (!text) return null;
@@ -532,14 +532,16 @@ const CreateModeChat = ({ onOpenSettings }) => {
 
   const handleExportAll = useCallback(async () => {
     const title = messages[0]?.content?.slice(0, 40) || 'ゲーム';
-    await exportChatAndBlocksToPDF({
+    // 折りたたみ状態に関係なく、現在の完成形（mergedSprites）をソースから描き直してPDF化。
+    // 会話＝1ページ、各スプライト＝1ページの「セクション別長尺ページ」で出力する。
+    await exportSessionToPDF({
       chatElementId: 'create-mode-messages',
-      blocksElementId: 'block-display-all',
-      filename: `scratteach-${title}.pdf`,
+      sprites: mergedSprites,
+      spec: mergedSpec || latestGenerating?.parsed?.spec,
       gameTitle: title,
-      spec: latestGenerating?.parsed?.spec,
+      filename: `scratteach-${title}.pdf`,
     });
-  }, [messages, latestGenerating]);
+  }, [messages, mergedSprites, mergedSpec, latestGenerating]);
 
   const lastAIIndex = messages.map((m, i) => ({ m, i })).filter(({ m }) => m.role === 'assistant').at(-1)?.i ?? -1;
   const lastGeneratingIndex = messages

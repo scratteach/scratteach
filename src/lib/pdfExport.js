@@ -1,7 +1,24 @@
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
+import { renderScratchSVG } from './scratchRender.js';
 
 const MARGIN = 10; // mm
+const A4_W = 210;  // mm
+const CONTENT_W = A4_W - MARGIN * 2; // 190mm
+const MM_PER_PX = 25.4 / 96; // CSSピクセル→mm（96dpi）
+const CONTENT_W_PX = Math.round(CONTENT_W / MM_PER_PX);
+const RASTER = 2; // html2canvasの解像度倍率
+
+// ブロックのPDF描画スケール（scratchblocksのscale値）。
+// 値を上げるほどブロックが大きくなる。標準ブロックがA4本文幅の約2割（横に4〜5個）になる
+// 1.1前後を採用（現状表示の約5〜6割の大きさ感）。横長スクリプトは fitBlockWidth で縮小する。
+const BLOCK_SCALE = 1.1;
+// 横幅オーバー時、A4本文幅へ縮小してよい下限比率。これ未満になるならページ自体を広げる。
+const MIN_FIT_RATIO = 0.6;
+// PDF1ページの最大高さ(mm)。これを超える会話ログはA4複数ページへ分割（保険）。
+const MAX_PAGE_MM = 4800;
+
+// ===== 既存：DOMキャプチャ系（質問モードの会話PDF等で使用） =====
 
 // スクロール可能な要素を含む全コンテンツをhtml2canvasでキャプチャ
 export const captureElement = async (element) => {
@@ -17,7 +34,7 @@ export const captureElement = async (element) => {
 
   try {
     return await html2canvas(element, {
-      scale: 2,
+      scale: RASTER,
       useCORS: true,
       logging: false,
       scrollX: 0,
@@ -33,8 +50,6 @@ export const captureElement = async (element) => {
 };
 
 // 日本語を含むHTMLを画面外でレンダリングしてキャンバス化する。
-// jsPDFの標準フォントは日本語非対応で pdf.text() だと文字化けするため、
-// テキストはすべてブラウザの日本語フォントで描画してから画像として貼る。
 const htmlToCanvas = async (html, cssWidth) => {
   const container = document.createElement('div');
   Object.assign(container.style, {
@@ -54,7 +69,7 @@ const htmlToCanvas = async (html, cssWidth) => {
   document.body.appendChild(container);
   try {
     return await html2canvas(container, {
-      scale: 2,
+      scale: RASTER,
       backgroundColor: '#ffffff',
       logging: false,
     });
@@ -63,7 +78,7 @@ const htmlToCanvas = async (html, cssWidth) => {
   }
 };
 
-// HTMLエスケープ（タイトルや仕様値にHTML特殊文字が含まれても安全に）
+// HTMLエスケープ
 const esc = (s) =>
   String(s ?? '')
     .replace(/&/g, '&amp;')
@@ -71,14 +86,12 @@ const esc = (s) =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
-// キャンバスをPDFの現在ページから複数ページに分割して描画
-// 戻り値: 最終ページで使用したy座標の末尾（続けてテキストを追加する際に使用）
+// キャンバスをPDFの現在ページから複数A4ページに分割して描画（会話ログの保険用）
 export const addCanvasToMultiPagePDF = (pdf, canvas, startY = MARGIN) => {
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
 
   const imgWidth = pageWidth - MARGIN * 2;
-  // scale:2 のキャンバスはピクセルが2倍のため、実際の表示サイズで計算
   const imgHeight = (canvas.height / canvas.width) * imgWidth;
   const visiblePerPage = pageHeight - MARGIN;
 
@@ -86,33 +99,20 @@ export const addCanvasToMultiPagePDF = (pdf, canvas, startY = MARGIN) => {
 
   let remaining = imgHeight - (visiblePerPage - startY);
   if (remaining <= 0) {
-    return startY + imgHeight; // 単一ページに収まった
+    return startY + imgHeight;
   }
   while (remaining > 0) {
     pdf.addPage();
     const yPos = -(imgHeight - remaining);
     pdf.addImage(canvas, 'PNG', MARGIN, yPos, imgWidth, imgHeight, '', 'FAST');
-    const thisPageEnd = yPos + imgHeight; // このページでの画像下端
+    const thisPageEnd = yPos + imgHeight;
     remaining -= visiblePerPage;
     if (remaining <= 0) return thisPageEnd;
   }
   return MARGIN;
 };
 
-// A4の本文幅（pageWidth - 余白*2）をCSSピクセルに換算（96dpi: 1mm≒3.7795px）
-const contentPx = (pdf) =>
-  Math.round((pdf.internal.pageSize.getWidth() - MARGIN * 2) * 3.7795);
-
-// 日本語見出しを画像として現在位置に描画し、続きのy座標を返す
-const addHeading = async (pdf, text, startY = MARGIN) => {
-  const canvas = await htmlToCanvas(
-    `<div style="font-size:18px;font-weight:700;">${esc(text)}</div>`,
-    contentPx(pdf)
-  );
-  return addCanvasToMultiPagePDF(pdf, canvas, startY);
-};
-
-// 単一要素をPDFに書き出す
+// 単一要素をPDFに書き出す（質問モードの会話ログ等）
 export const exportElementToPDF = async (elementId, filename, pageTitle = null) => {
   const element = document.getElementById(elementId);
   if (!element) return;
@@ -121,12 +121,11 @@ export const exportElementToPDF = async (elementId, filename, pageTitle = null) 
 
   let startY = MARGIN;
   if (pageTitle) {
-    // 日本語タイトル＋日付を画像化して描画（pdf.text は日本語非対応で文字化けする）
     const headerCanvas = await htmlToCanvas(
       `<div style="font-size:20px;font-weight:700;">${esc(pageTitle)}</div>` +
         `<div style="font-size:11px;margin-top:6px;">${esc(new Date().toLocaleDateString('ja-JP'))}</div>` +
         `<hr style="border:none;border-top:1px solid #000;margin:8px 0 0;"/>`,
-      contentPx(pdf)
+      CONTENT_W_PX
     );
     startY = addCanvasToMultiPagePDF(pdf, headerCanvas, MARGIN) + 4;
   }
@@ -138,62 +137,190 @@ export const exportElementToPDF = async (elementId, filename, pageTitle = null) 
   pdf.save(filename);
 };
 
-// 会話エリアとブロックエリアを1つのPDFに保存
-export const exportChatAndBlocksToPDF = async ({
-  chatElementId,
-  blocksElementId,
-  filename,
-  gameTitle,
-  spec,
-}) => {
-  const pdf = new jsPDF('p', 'mm', 'a4');
-  let hasContent = false;
+// ===== 新方式：セクションごとに1枚の長尺ページを作る =====
 
-  // ページ1: タイトル + 仕様（日本語はHTMLを画像化して描画）
-  if (gameTitle) {
-    const specRows =
-      spec && Object.keys(spec).length > 0
-        ? `<div style="font-size:16px;font-weight:700;margin:18px 0 8px;">【決定した仕様】</div>` +
-          Object.entries(spec)
-            .map(
-              ([key, value]) =>
-                `<div style="font-size:13px;line-height:1.6;margin:2px 0;">・${esc(key)}：${esc(value)}</div>`
-            )
-            .join('')
-        : '';
-    const coverCanvas = await htmlToCanvas(
-      `<div style="font-size:24px;font-weight:700;">ゲーム名：${esc(gameTitle)}</div>` +
-        `<div style="font-size:13px;margin-top:10px;">作成日：${esc(new Date().toLocaleDateString('ja-JP'))}</div>` +
-        `<hr style="border:none;border-top:1px solid #000;margin:10px 0 0;"/>` +
-        specRows,
-      contentPx(pdf)
-    );
-    addCanvasToMultiPagePDF(pdf, coverCanvas, MARGIN);
-    hasContent = true;
+// 横幅に応じて、ブロック画像の描画幅とページ幅を決める。
+// ・本文幅に収まる → そのまま、ページはA4
+// ・はみ出すが MIN_FIT_RATIO まで縮めれば収まる → 本文幅へ縮小、ページはA4
+// ・それでも収まらない → 縮小は下限で止め、そのページだけ横幅を広げる
+const fitBlockWidth = (naturalWidthMm) => {
+  if (naturalWidthMm <= CONTENT_W) return { drawW: naturalWidthMm, pageW: A4_W };
+  const ratio = CONTENT_W / naturalWidthMm;
+  if (ratio >= MIN_FIT_RATIO) return { drawW: CONTENT_W, pageW: A4_W };
+  const drawW = naturalWidthMm * MIN_FIT_RATIO;
+  return { drawW, pageW: drawW + MARGIN * 2 };
+};
+
+// スプライトのブロックコードを画面外で描き直してキャンバス化する。
+// 戻り値: { canvas, cssW, cssH }（cssはBLOCK_SCALE適用後のCSSピクセル寸法）
+const renderBlocksCanvas = async (blocksCode) => {
+  const svg = renderScratchSVG(blocksCode, BLOCK_SCALE);
+  const cssW = parseFloat(svg.getAttribute('width')) || 0;
+  const cssH = parseFloat(svg.getAttribute('height')) || 0;
+  svg.style.display = 'block';
+
+  const container = document.createElement('div');
+  Object.assign(container.style, {
+    position: 'fixed',
+    left: '-99999px',
+    top: '0',
+    background: '#ffffff',
+    margin: '0',
+    padding: '0',
+    width: `${cssW}px`,
+    height: `${cssH}px`,
+  });
+  container.appendChild(svg);
+  document.body.appendChild(container);
+  try {
+    const canvas = await html2canvas(container, {
+      scale: RASTER,
+      backgroundColor: '#ffffff',
+      logging: false,
+      width: Math.ceil(cssW),
+      height: Math.ceil(cssH),
+    });
+    return { canvas, cssW, cssH };
+  } finally {
+    document.body.removeChild(container);
   }
+};
 
-  // 会話エリアのキャプチャ
-  const chatEl = chatElementId ? document.getElementById(chatElementId) : null;
+// 1スプライト分のページ記述子（見出し＋説明＋ブロック）を組み立てる
+const buildSpriteSection = async (sprite, index) => {
+  const headingHtml =
+    `<div style="font-size:16px;font-weight:700;">【スプライト：${esc(sprite.name)}】</div>` +
+    (sprite.description
+      ? `<div style="font-size:12px;line-height:1.6;color:#333;margin-top:4px;">📌 ${esc(sprite.description)}</div>`
+      : '');
+  const headingCanvas = await htmlToCanvas(headingHtml, CONTENT_W_PX);
+  const headingH = (headingCanvas.height / headingCanvas.width) * CONTENT_W;
+
+  const { canvas: blockCanvas, cssW, cssH } = await renderBlocksCanvas(sprite.blocks);
+  const naturalW = cssW * MM_PER_PX;
+  const { drawW, pageW } = fitBlockWidth(naturalW);
+  const drawH = cssW > 0 ? drawW * (cssH / cssW) : 0;
+
+  const items = [];
+  let y = MARGIN;
+  items.push({ canvas: headingCanvas, x: MARGIN, y, w: CONTENT_W, h: headingH });
+  y += headingH + 4;
+  items.push({ canvas: blockCanvas, x: MARGIN, y, w: drawW, h: drawH });
+  y += drawH + MARGIN;
+
+  return { pageW: Math.max(A4_W, pageW), pageH: y, items };
+};
+
+// 会話ログのページ記述子を組み立てる（タイトル・仕様・会話キャプチャ）
+const buildConversationSection = async (chatEl, gameTitle, spec) => {
+  const specRows =
+    spec && Object.keys(spec).length > 0
+      ? `<div style="font-size:14px;font-weight:700;margin:14px 0 6px;">【決めた仕様】</div>` +
+        Object.entries(spec)
+          .map(
+            ([key, value]) =>
+              `<div style="font-size:12px;line-height:1.6;margin:2px 0;">・${esc(key)}：${esc(value)}</div>`
+          )
+          .join('')
+      : '';
+  const headingHtml =
+    `<div style="font-size:22px;font-weight:700;">${esc(gameTitle || 'ゲーム')}</div>` +
+    `<div style="font-size:11px;margin-top:6px;">作成日：${esc(new Date().toLocaleDateString('ja-JP'))}</div>` +
+    `<hr style="border:none;border-top:1px solid #000;margin:8px 0;"/>` +
+    specRows +
+    `<div style="font-size:16px;font-weight:700;margin-top:14px;">【会話ログ】</div>`;
+  const headingCanvas = await htmlToCanvas(headingHtml, CONTENT_W_PX);
+  const headingH = (headingCanvas.height / headingCanvas.width) * CONTENT_W;
+
+  let chatCanvas = null;
+  let chatDrawW = 0;
+  let chatDrawH = 0;
   if (chatEl) {
-    if (hasContent) pdf.addPage();
-    const y = await addHeading(pdf, '【会話ログ】', MARGIN);
-    const chatCanvas = await captureElement(chatEl);
+    const cssW = chatEl.scrollWidth;
+    const cssH = chatEl.scrollHeight;
+    chatCanvas = await captureElement(chatEl);
     if (chatCanvas) {
-      addCanvasToMultiPagePDF(pdf, chatCanvas, y + 3);
-    }
-    hasContent = true;
-  }
-
-  // ブロックエリアのキャプチャ
-  const blocksEl = blocksElementId ? document.getElementById(blocksElementId) : null;
-  if (blocksEl) {
-    if (hasContent) pdf.addPage();
-    const y = await addHeading(pdf, '【Scratchブロック】', MARGIN);
-    const blocksCanvas = await captureElement(blocksEl);
-    if (blocksCanvas) {
-      addCanvasToMultiPagePDF(pdf, blocksCanvas, y + 3);
+      const naturalW = cssW * MM_PER_PX;
+      chatDrawW = Math.min(naturalW, CONTENT_W); // 拡大はしない（文字の巨大化防止）
+      chatDrawH = cssW > 0 ? chatDrawW * (cssH / cssW) : 0;
     }
   }
 
-  pdf.save(filename);
+  const items = [];
+  let y = MARGIN;
+  items.push({ canvas: headingCanvas, x: MARGIN, y, w: CONTENT_W, h: headingH });
+  y += headingH + 4;
+  if (chatCanvas) {
+    items.push({ canvas: chatCanvas, x: MARGIN, y, w: chatDrawW, h: chatDrawH });
+    y += chatDrawH + MARGIN;
+  }
+
+  return { pageW: A4_W, pageH: y, items, tooTall: y > MAX_PAGE_MM, headingCanvas, headingH, chatCanvas };
+};
+
+// jsPDFにページを追加してセクションを描画
+const drawSection = (pdf, section) => {
+  for (const it of section.items) {
+    pdf.addImage(it.canvas, 'PNG', it.x, it.y, it.w, it.h, '', 'FAST');
+  }
+};
+
+const newOrAddPage = (pdf, pageW, pageH) => {
+  const orientation = pageW >= pageH ? 'l' : 'p';
+  if (!pdf) {
+    return new jsPDF({ orientation, unit: 'mm', format: [pageW, pageH] });
+  }
+  pdf.addPage([pageW, pageH], orientation);
+  return pdf;
+};
+
+const sanitize = (s) =>
+  String(s ?? 'ゲーム')
+    .replace(/[\\/:*?"<>|\n\r]+/g, '-')
+    .slice(0, 40) || 'ゲーム';
+
+// 1スプライトだけを単体PDFに書き出す（折りたたみ状態に関係なくソースから描き直す）
+export const exportSpriteToPDF = async (sprite, { gameTitle } = {}) => {
+  if (!sprite || !sprite.blocks) return;
+  const section = await buildSpriteSection(sprite, 0);
+  const pdf = newOrAddPage(null, section.pageW, section.pageH);
+  drawSection(pdf, section);
+  const name = sanitize(gameTitle ? `${gameTitle}-${sprite.name}` : sprite.name);
+  pdf.save(`scratteach-${name}.pdf`);
+};
+
+// 会話＋全スプライトを、セクションごとの長尺ページとして1つのPDFに書き出す
+export const exportSessionToPDF = async ({
+  chatElementId,
+  sprites = [],
+  spec,
+  gameTitle,
+  filename,
+}) => {
+  const chatEl = chatElementId ? document.getElementById(chatElementId) : null;
+
+  let pdf = null;
+
+  // ページ1：会話ログ
+  const conv = await buildConversationSection(chatEl, gameTitle, spec);
+  if (conv.tooTall) {
+    // 保険：会話が極端に長い場合はA4複数ページへ分割
+    pdf = new jsPDF('p', 'mm', 'a4');
+    let y = addCanvasToMultiPagePDF(pdf, conv.headingCanvas, MARGIN) + 4;
+    if (conv.chatCanvas) addCanvasToMultiPagePDF(pdf, conv.chatCanvas, y);
+  } else {
+    pdf = newOrAddPage(null, conv.pageW, conv.pageH);
+    drawSection(pdf, conv);
+  }
+
+  // ページ2以降：各スプライト
+  for (let i = 0; i < sprites.length; i++) {
+    const sprite = sprites[i];
+    if (!sprite || !sprite.blocks) continue;
+    const section = await buildSpriteSection(sprite, i);
+    pdf = newOrAddPage(pdf, section.pageW, section.pageH);
+    drawSection(pdf, section);
+  }
+
+  pdf.save(filename || `scratteach-${sanitize(gameTitle)}.pdf`);
 };

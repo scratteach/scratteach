@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import ScratchBlockPanel from '../Chat/ScratchBlockPanel.jsx';
-import { captureElement } from '../../lib/pdfExport.js';
+import { exportSpriteToPDF } from '../../lib/pdfExport.js';
 
 const ChevronIcon = ({ isOpen }) => (
   <svg
@@ -18,27 +18,19 @@ const SpriteIcon = () => (
   </svg>
 );
 
-// ブロックエリアのみPNGで保存（📄↓ボタン）
-const exportBlockToPNG = async (elementId, spriteName) => {
-  const element = document.getElementById(elementId);
-  if (!element) return;
-  const canvas = await captureElement(element);
-  if (!canvas) return;
-  const link = document.createElement('a');
-  link.download = `scratteach-${spriteName}.png`;
-  link.href = canvas.toDataURL('image/png');
-  link.click();
-};
-
-const SpriteSection = ({ sprite, blockId, defaultOpen = false, onSpriteInvalidBlocks, onRebuild, isRebuilding }) => {
+const SpriteSection = ({ sprite, blockId, gameTitle, defaultOpen = false, onSpriteInvalidBlocks, onRebuild, isRebuilding }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
   const [isExporting, setIsExporting] = useState(false);
 
-  const handleExportPNG = async (e) => {
+  // 折りたたみ状態に関係なく、ブロックのソースからPDF用に描き直して保存する
+  const handleExportPDF = async (e) => {
     e.stopPropagation();
     setIsExporting(true);
-    await exportBlockToPNG(blockId, sprite.name);
-    setIsExporting(false);
+    try {
+      await exportSpriteToPDF(sprite, { gameTitle });
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const handleInvalidBlocks = useCallback((blocks) => {
@@ -60,9 +52,9 @@ const SpriteSection = ({ sprite, blockId, defaultOpen = false, onSpriteInvalidBl
         </span>
         <span className="flex items-center gap-2 flex-shrink-0">
           <span
-            onClick={handleExportPNG}
+            onClick={handleExportPDF}
             className="text-xs px-2 py-0.5 rounded border border-sky-300 text-sky-600 bg-white hover:bg-sky-50 transition-colors cursor-pointer"
-            title="このスプライトのブロックをPNG保存"
+            title="このスプライトのブロックをPDF保存"
           >
             {isExporting ? '...' : '📄↓'}
           </span>
@@ -160,6 +152,7 @@ const BlockDisplay = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks,
             key={i}
             sprite={sprite}
             blockId={`${idPrefix}-${i}`}
+            gameTitle={gameTitle}
             defaultOpen={i === 0}
             onSpriteInvalidBlocks={handleSpriteInvalidBlocks}
             onRebuild={onRebuild}

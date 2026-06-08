@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { version as APP_VERSION } from '../../../package.json';
 
 const CloseIcon = () => (
   <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -248,6 +249,8 @@ const SettingsModal = ({ isOpen, onClose }) => {
             <p className="font-medium mb-1">セキュリティについて</p>
             <p>APIキーはこのデバイスのローカルストレージにのみ保存され、外部サーバーには送信されません。</p>
           </div>
+
+          <p className="text-center text-xs text-gray-400">スクラッティーチ v{APP_VERSION}</p>
         </div>
 
         {/* Footer */}
