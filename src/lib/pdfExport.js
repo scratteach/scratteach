@@ -18,6 +18,35 @@ const MIN_FIT_RATIO = 0.6;
 // PDF1ページの最大高さ(mm)。これを超える会話ログはA4複数ページへ分割（保険）。
 const MAX_PAGE_MM = 4800;
 
+// iOS（iPhone/iPad）判定。iOS SafariはjsPDFのsave()がダウンロードにならず、
+// 同じ画面内のPDFビューアでドキュメントを置き換えてしまう（戻るとPWAがリロードされ状態が消える）。
+const isIOS = () => {
+  if (typeof navigator === 'undefined') return false;
+  return (
+    /iP(hone|ad|od)/.test(navigator.userAgent) ||
+    // iPadOS 13+ はデスクトップSafariを名乗るためタッチ数で補正
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  );
+};
+
+// PDFを保存する。iOSではSPA自体を置き換えないよう、Blobを別タブで開く方式にする。
+// （別タブ＝Safari側でPDFが開き、元のPWA画面はそのまま残る）。それ以外は従来どおりダウンロード。
+const savePdf = (pdf, filename) => {
+  if (isIOS()) {
+    try {
+      const url = pdf.output('bloburl');
+      const win = window.open(url, '_blank');
+      if (win) return;
+      // ポップアップが塞がれた場合は同タブで開く（最低限PDFは見られる）
+      window.location.href = url;
+      return;
+    } catch {
+      // 失敗時は従来のsave()にフォールバック
+    }
+  }
+  pdf.save(filename);
+};
+
 // ===== 既存：DOMキャプチャ系（質問モードの会話PDF等で使用） =====
 
 // スクロール可能な要素を含む全コンテンツをhtml2canvasでキャプチャ
@@ -134,7 +163,7 @@ export const exportElementToPDF = async (elementId, filename, pageTitle = null) 
   if (!canvas) return;
 
   addCanvasToMultiPagePDF(pdf, canvas, startY);
-  pdf.save(filename);
+  savePdf(pdf, filename);
 };
 
 // ===== 新方式：セクションごとに1枚の長尺ページを作る =====
@@ -286,7 +315,7 @@ export const exportSpriteToPDF = async (sprite, { gameTitle } = {}) => {
   const pdf = newOrAddPage(null, section.pageW, section.pageH);
   drawSection(pdf, section);
   const name = sanitize(gameTitle ? `${gameTitle}-${sprite.name}` : sprite.name);
-  pdf.save(`scratteach-${name}.pdf`);
+  savePdf(pdf, `scratteach-${name}.pdf`);
 };
 
 // 会話＋全スプライトを、セクションごとの長尺ページとして1つのPDFに書き出す
@@ -322,5 +351,5 @@ export const exportSessionToPDF = async ({
     drawSection(pdf, section);
   }
 
-  pdf.save(filename || `scratteach-${sanitize(gameTitle)}.pdf`);
+  savePdf(pdf, filename || `scratteach-${sanitize(gameTitle)}.pdf`);
 };

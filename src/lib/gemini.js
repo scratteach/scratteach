@@ -31,6 +31,57 @@ export const parseAIResponse = (text) => {
   }
 };
 
+// ── ゲーム動作QA（意味ゲート）─────────────────────────────
+// 生成パスとは独立した「厳格なQAレビュアー」。自分の作文を弁護させないため別呼び出しにする。
+// ジャンル別ルーブリック（必須メカニクス＋よくある失敗）を採点基準に、生成済みブロックが
+// 本当に遊べるかを判定し、欠落・問題を列挙させる。
+const GAME_QA_SYSTEM_PROMPT = `あなたはScratchゲームの厳格なQA（品質保証）レビュアーです。
+与えられた「必須メカニクス」と「よくある失敗」を採点基準として、生成済みのScratchブロックが
+そのゲームとして最低限成立しているか（実際に遊べるか）を判定します。
+
+採点ルール：
+- 必須メカニクスの1つ1つについて、それを実装しているブロックが本当に存在するか確認する。
+- 「あるはず」で判断しない。該当するブロックを実際に引用できる場合のみ「実装済み」とみなす。引用できなければ「欠落」。
+- あなたはこのブロックの作者ではない。甘く採点せず、重箱の隅をつつくつもりで欠落・矛盾・貫通・終わらない等の欠陥を探す。
+- 「よくある失敗」のいずれかに該当していないかも1つずつ確認する。
+
+出力は必ず次のJSONのみ（前後にテキストや\`\`\`を一切付けない）：
+{"ok": true/false, "missing": ["欠落している必須メカニクスと、なぜそう判断したかを具体的に"], "issues": ["該当する失敗と、どのスプライトの問題かを具体的に"]}
+
+- 必須メカニクスが全て実装され、よくある失敗にも該当しなければ ok:true、missingとissuesは空配列。
+- 1つでも欠落・該当があれば ok:false にし、該当項目をmissing/issuesに具体的に列挙する（あいまいな指摘ではなく、何がどう足りないかを書く）。`;
+
+const parseQAResponse = (text) => {
+  try {
+    const clean = text.replace(/```json\n?|\n?```/g, '').trim();
+    const obj = JSON.parse(clean);
+    return {
+      ok: !!obj.ok,
+      missing: Array.isArray(obj.missing) ? obj.missing : [],
+      issues: Array.isArray(obj.issues) ? obj.issues : [],
+    };
+  } catch {
+    // パース失敗時はfail-open（表示をブロックしない）。構文の赤ブロックゲートは別途走る。
+    return { ok: true, missing: [], issues: [] };
+  }
+};
+
+// rubric: buildGenreQARubric() の出力 / sprites: [{name, blocks}]
+export const runGameQACheck = async (rubric, sprites, apiKey, model) => {
+  const blocksText = (sprites || [])
+    .map(s => `■ スプライト「${s.name}」\n${s.blocks}`)
+    .join('\n\n');
+  const userContent = `${rubric}\n\n=== 生成されたブロック ===\n${blocksText}`;
+  const raw = await callGemini(
+    [{ role: 'user', content: userContent }],
+    apiKey,
+    model,
+    'ja',
+    GAME_QA_SYSTEM_PROMPT
+  );
+  return parseQAResponse(raw);
+};
+
 export const callGemini = async (messages, apiKey, model, blockLang = 'ja', systemPromptOverride = null) => {
   if (!apiKey) {
     throw new GeminiAPIError('APIキーが設定されていません', 0, 'NO_API_KEY');

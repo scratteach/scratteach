@@ -73,6 +73,45 @@ function fixMessageBlock(line) {
   return line;
 }
 
+// キー押下ブロックのドロップダウン境界ミスを補正する。
+// 正しい ja 表記は「%1 キーが押された(とき)」＝ ドロップダウンは向き等の値だけ、
+// 「キー」は固定文字列側。AIは「キー」を値に巻き込み「(右向き矢印キー v) が押された」
+// のように出しがちで、これはハッシュ不一致で赤ブロックになる。
+// (○○[キー] v) が押された(とき) → (○○ v) キーが押された(とき) に正規化する。
+// 正しい形「(○○ v) キーが押された」は ") が押された" を含まないので誤補正しない。
+function fixKeyPressedBlock(line) {
+  return line.replace(/\(([^()]+?) v\) が押された(とき)?/g, (_m, val, toki) => {
+    const key = val.replace(/\s*キー$/, '').trim();
+    return `(${key} v) キーが押された${toki || ''}`;
+  });
+}
+
+// 「クローンを作る」のドロップダウン抜けを補正する。
+// 正しい ja 表記は「(自分自身 v) のクローンを作る」。AIは「クローンを作る」だけ、または
+// 「自分自身のクローンを作る」「(自分自身) のクローンを作る」のようにドロップダウンを
+// 落として出しがちで、いずれも赤ブロックになる。ターゲット名を (名前 v) の形に正規化する。
+// 「このクローンを削除する」は別ブロックなので対象外。
+function fixCloneBlock(line) {
+  const t = line.trim();
+  if (!t.endsWith('クローンを作る')) return line;
+  // すでに正しい「(X v) のクローンを作る」はそのまま
+  if (/^\([^()]+ v\) のクローンを作る$/.test(t)) return line;
+
+  // 「…のクローンを作る」からターゲット名を取り出す（無ければ自分自身）
+  const m = t.match(/^(.*?)\s*のクローンを作る$/);
+  let target = m ? m[1].trim() : '';
+  // 装飾を外して名前だけにする： (X v) / (X) / [X v] / [X] / X
+  target = target
+    .replace(/^\((.+?)\s+v\)$/, '$1')
+    .replace(/^\((.+?)\)$/, '$1')
+    .replace(/^\[(.+?)\s+v\]$/, '$1')
+    .replace(/^\[(.+?)\]$/, '$1')
+    .trim();
+  if (!target) target = '自分自身';
+
+  return `(${target} v) のクローンを作る`;
+}
+
 // 「もし <条件> ではないなら」という存在しない記法を修正する。
 // Scratchに「もし〜ではないなら」ブロックは無く、赤ブロックになる。
 // 正しくは【演算】の「ではない」で条件全体を包む：もし <<条件> ではない> なら
@@ -283,6 +322,8 @@ export function correctScratchBlocks(code) {
   const fixedLines = lines.map(line => {
     let l = line.trim();
     l = fixMessageBlock(l);
+    l = fixKeyPressedBlock(l);
+    l = fixCloneBlock(l);
     l = fixNegatedCondition(l);
     l = fixChainedBoolean(l);
     l = fixReporterInVariableBlock(l);

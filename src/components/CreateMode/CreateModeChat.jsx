@@ -2,8 +2,9 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import InputBar from '../Chat/InputBar.jsx';
 import SpecSummary from './SpecSummary.jsx';
 import BlockDisplay from './BlockDisplay.jsx';
-import { callGemini, parseCreateModeResponse, GeminiAPIError } from '../../lib/gemini.js';
+import { callGemini, parseCreateModeResponse, GeminiAPIError, runGameQACheck } from '../../lib/gemini.js';
 import { CREATE_MODE_SYSTEM_PROMPT } from '../../prompts/createModePrompt.js';
+import { detectGenre, buildGenreGenerationAddendum, buildGenreQARubric } from '../../prompts/genreTemplates.js';
 import { useCreateSession } from '../../hooks/useCreateSession.js';
 import { exportSessionToPDF } from '../../lib/pdfExport.js';
 
@@ -268,9 +269,12 @@ const CreateModeChat = ({ onOpenSettings }) => {
   const messagesEndRef = useRef(null);
   const autoFixAttemptsRef = useRef(0);
   const autoFixFiredRef = useRef(false);
+  const qaFiredRef = useRef(false);
+  const didAutoRestoreRef = useRef(false);
   const messagesRef = useRef(messages);
 
   const {
+    sessions,
     latestInProgressSession,
     startNewSession,
     addMessage: addMessageToDB,
@@ -293,6 +297,24 @@ const CreateModeChat = ({ onOpenSettings }) => {
     messagesRef.current = messages;
   }, [messages]);
 
+  // 直近の作るモードセッションを起動時に自動復元する。
+  // iOSのPDFビューア（「完了」で戻る）等でPWAがリロードされても、チャットが消えず復帰する。
+  // 復元は初回1度だけ。以降の「＋新しく作る」やメッセージ更新では開き直さない。
+  useEffect(() => {
+    if (didAutoRestoreRef.current) return;
+    // すでに画面に会話があれば復元不要（進行中の状態を上書きしない）
+    if (sessionId || messages.length > 0) {
+      didAutoRestoreRef.current = true;
+      return;
+    }
+    const latest = sessions?.[0]; // updatedAt降順なので先頭が最新セッション
+    if (latest && latest.messages?.length) {
+      didAutoRestoreRef.current = true;
+      setSessionId(latest.id);
+      setMessages(latest.messages);
+    }
+  }, [sessions, sessionId, messages.length]);
+
   // 現在の完成形：全generatingメッセージをスプライト名でまとめた1枚
   const generatingMessages = messages.filter(
     m => m.role === 'assistant' && m.parsed?.phase === 'generating' && m.parsed?.sprites?.length
@@ -302,10 +324,13 @@ const CreateModeChat = ({ onOpenSettings }) => {
   const mergedSpec = latestGenerating?.parsed?.spec || null;
 
   const handleResume = useCallback(() => {
-    if (!latestInProgressSession) return;
-    setSessionId(latestInProgressSession.id);
-    setMessages(latestInProgressSession.messages || []);
-  }, [latestInProgressSession]);
+    // 進行中が無ければ完成済みでも最新セッションを開けるようにする
+    const target = latestInProgressSession || sessions?.[0];
+    if (!target) return;
+    didAutoRestoreRef.current = true;
+    setSessionId(target.id);
+    setMessages(target.messages || []);
+  }, [latestInProgressSession, sessions]);
 
   const callAPI = useCallback(async (userText, imageData, history) => {
     const apiKey = localStorage.getItem('scratteach_api_key');
@@ -330,8 +355,16 @@ const CreateModeChat = ({ onOpenSettings }) => {
       },
     ];
 
+    // ジャンルを検出できたら、核（必須メカニクス＋手本イディオム）をプロンプトに注入し、
+    // 質問せず必ず実装させる。未対応ジャンルは従来どおり（フォールバック）。
+    const convoText = [...history.map(m => m.content || ''), userText].join('\n');
+    const genre = detectGenre(convoText);
+    const systemPrompt = genre
+      ? `${CREATE_MODE_SYSTEM_PROMPT}\n\n${buildGenreGenerationAddendum(genre)}`
+      : CREATE_MODE_SYSTEM_PROMPT;
+
     try {
-      const raw = await callGemini(historyForAPI, apiKey, model, 'ja', CREATE_MODE_SYSTEM_PROMPT);
+      const raw = await callGemini(historyForAPI, apiKey, model, 'ja', systemPrompt);
       const parsed = parseCreateModeResponse(raw);
       return { raw, parsed };
     } catch (err) {
@@ -451,12 +484,69 @@ const CreateModeChat = ({ onOpenSettings }) => {
     }
   }, [callAPI, applyRebuildResult, isAutoFixing, isLoading]);
 
+  // 動作QAゲート（意味ゲート）：generating結果が出たあとに別パスのQA AIで採点し、
+  // ジャンルの必須メカニクスが欠落していたら1回だけ自動補完して作り直す。
+  // 赤ブロック検出（構文ゲート）とは独立。1ユーザーターンにつき最大1回（qaFiredRefで制御）。
+  // newGenMessage: 直前にappendしたgenerating結果（messagesRefにはまだ反映されていないため明示的に渡す）
+  const runQAGate = useCallback(async (newGenMessage) => {
+    if (qaFiredRef.current) return;
+
+    const genreText = [...messagesRef.current.map(m => m.content || ''), newGenMessage?.content || ''].join('\n');
+    const genre = detectGenre(genreText);
+    if (!genre) return; // 未対応ジャンルはQAしない（フォールバック）
+
+    const apiKey = localStorage.getItem('scratteach_api_key');
+    const model = localStorage.getItem('scratteach_model') || 'gemini-3.1-flash-lite';
+    if (!apiKey) return;
+
+    // 現在の完成形＝過去のgenerating（ref）＋今回の新メッセージ をスプライト名で畳み込む
+    const priorGen = messagesRef.current.filter(
+      m => m.role === 'assistant' && m.parsed?.phase === 'generating' && m.parsed?.sprites?.length
+    );
+    const merged = mergeGeneratingSprites(
+      newGenMessage ? [...priorGen, newGenMessage] : priorGen
+    );
+    if (!merged.length) return;
+
+    qaFiredRef.current = true;
+
+    try {
+      const qa = await runGameQACheck(buildGenreQARubric(genre), merged, apiKey, model);
+      const problems = [...(qa.missing || []), ...(qa.issues || [])];
+      if (qa.ok || !problems.length) return; // 合格ならそのまま表示
+
+      // 欠落を指摘して1回だけ作り直し
+      setIsAutoFixing(true);
+      try {
+        const names = merged.map(s => s.name);
+        const namesLine = names.length
+          ? `\n現在のスプライト：${names.join('、')}。\nこれらを同じ名前のままsprites[]に入れて返してください（修正のないスプライトも省略せず含める）。`
+          : '';
+        const detail = problems.map(p => `・${p}`).join('\n');
+        const correctionText =
+          `【動作チェックの指摘】\nこのゲームには次の不足・問題があり、まだゲームとして成立していません：\n${detail}${namesLine}\n\n` +
+          `これらをすべて満たすよう、generatingフェーズで全スプライトのブロックを作り直してください。` +
+          `特に上で指摘された必須メカニクスは必ずブロックとして実装すること。` +
+          `message には【Scratchで先に準備してください】ガイド（STEP5の形式）を必ず含めること。`;
+        const result = await callAPI(correctionText, null, messagesRef.current);
+        if (result?.parsed?.phase === 'generating' && result.parsed.sprites) {
+          applyRebuildResult(result);
+        }
+      } finally {
+        setIsAutoFixing(false);
+      }
+    } catch (err) {
+      console.error('QA gate failed:', err);
+    }
+  }, [callAPI, applyRebuildResult]);
+
   const handleSend = useCallback(async (text, imageData) => {
     if ((!text && !imageData) || isLoading) return;
 
-    // ユーザーが新しいメッセージを送ったら自動修正カウンターをリセット
+    // ユーザーが新しいメッセージを送ったら自動修正・QAカウンターをリセット
     autoFixAttemptsRef.current = 0;
     autoFixFiredRef.current = false;
+    qaFiredRef.current = false;
 
     const userMessage = {
       role: 'user',
@@ -510,11 +600,16 @@ const CreateModeChat = ({ onOpenSettings }) => {
             await updateSessionSpec(currentSessionId, result.parsed.spec, 'planning');
           }
         }
+
+        // 動作QAゲート：ブロック生成時のみ、別パスで成立性を採点し欠落を自動補完する
+        if (result.parsed.phase === 'generating' && result.parsed.sprites?.length) {
+          await runQAGate(aiMessage);
+        }
       }
     } finally {
       setIsLoading(false);
     }
-  }, [messages, isLoading, sessionId, startNewSession, addMessageToDB, callAPI, updateSessionSpec, updateSessionSprites]);
+  }, [messages, isLoading, sessionId, startNewSession, addMessageToDB, callAPI, updateSessionSpec, updateSessionSprites, runQAGate]);
 
   const handleApprove = useCallback(() => {
     handleSend('はい、作って！', null);
@@ -525,10 +620,13 @@ const CreateModeChat = ({ onOpenSettings }) => {
   }, [handleSend]);
 
   const handleNewSession = useCallback(() => {
+    // 進行中の会話があるときは誤タップ防止に確認する
+    if (messages.length > 0 && !window.confirm('今のチャットを閉じて新しく作りますか？')) return;
+    didAutoRestoreRef.current = true; // 直後の自動復元で前回を開き直さないようにする
     setMessages([]);
     setSessionId(null);
     setError(null);
-  }, []);
+  }, [messages.length]);
 
   const handleExportAll = useCallback(async () => {
     const title = messages[0]?.content?.slice(0, 40) || 'ゲーム';
@@ -575,7 +673,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
           {isEmpty && !isLoading ? (
             <WelcomeScreen
               onResume={handleResume}
-              hasInProgress={!!latestInProgressSession}
+              hasInProgress={!!(latestInProgressSession || sessions?.[0]?.messages?.length)}
             />
           ) : (
             <>
