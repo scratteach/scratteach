@@ -144,6 +144,28 @@ function fixNegatedCondition(line) {
   return `もし <${cond} ではない> なら`;
 }
 
+// 条件式の中で変数をドロップダウン記法で書いてしまった誤りを補正する。
+// 比較の項に入る変数はレポーター (変数) が正しい。AIは変数変更ブロックと同じ感覚で
+// [ライフ v] や (ライフ v) と書きがちで、これは赤ブロックにはならないが「緑のメニュー」
+// として描画され、オレンジの変数レポーターに見えない（見た目バグ）。
+// 対象は条件文（もし／〜まで）の中の比較演算子 < = > の左右の項のみ。
+// 「(音量 v) > (10) のとき」等のイベント帽子や「(マウスポインター v) に触れた」の
+// 正規ドロップダウンを誤変換しないため、条件文に限定し、演算子隣接の項だけを変換する。
+function fixVariableDropdownInCondition(line) {
+  const t = line.trim();
+  const isCondition = /^もし[\s　]/.test(t) || /まで(待つ|繰り返す)$/.test(t);
+  if (!isCondition) return line;
+
+  let l = line;
+  // 左辺： [名前 v] OP  /  (名前 v) OP  →  (名前) OP
+  l = l.replace(/\[([^[\]]+?) v\] ([<=>]) /g, '($1) $2 ');
+  l = l.replace(/\(([^()]+?) v\) ([<=>]) /g, '($1) $2 ');
+  // 右辺： OP [名前 v]  /  OP (名前 v)  →  OP (名前)
+  l = l.replace(/ ([<=>]) \[([^[\]]+?) v\]/g, ' $1 ($2)');
+  l = l.replace(/ ([<=>]) \(([^()]+?) v\)/g, ' $1 ($2)');
+  return l;
+}
+
 // scratchblocksの比較演算子 < > は閉じ括弧 < > と紛らわしい。
 // 前後が空白の「 < 」「 > 」は比較演算子、それ以外は括弧として扱う。
 function bracketKind(s, i) {
@@ -324,6 +346,7 @@ export function correctScratchBlocks(code) {
     l = fixMessageBlock(l);
     l = fixKeyPressedBlock(l);
     l = fixCloneBlock(l);
+    l = fixVariableDropdownInCondition(l);
     l = fixNegatedCondition(l);
     l = fixChainedBoolean(l);
     l = fixReporterInVariableBlock(l);
