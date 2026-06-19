@@ -144,25 +144,31 @@ function fixNegatedCondition(line) {
   return `もし <${cond} ではない> なら`;
 }
 
-// 条件式の中で変数をドロップダウン記法で書いてしまった誤りを補正する。
-// 比較の項に入る変数はレポーター (変数) が正しい。AIは変数変更ブロックと同じ感覚で
-// [ライフ v] や (ライフ v) と書きがちで、これは赤ブロックにはならないが「緑のメニュー」
-// として描画され、オレンジの変数レポーターに見えない（見た目バグ）。
-// 対象は条件文（もし／〜まで）の中の比較演算子 < = > の左右の項のみ。
-// 「(音量 v) > (10) のとき」等のイベント帽子や「(マウスポインター v) に触れた」の
-// 正規ドロップダウンを誤変換しないため、条件文に限定し、演算子隣接の項だけを変換する。
-function fixVariableDropdownInCondition(line) {
+// 計算・比較の中で変数をドロップダウン記法で書いてしまった誤りを補正する。
+// 演算（+ - * /）や比較（< = >）の項に入る変数はレポーター (変数) が正しい。AIは変数変更
+// ブロックと同じ感覚で [列 v] や (列 v) と書きがちで、計算の中では赤ブロック（未定義）に、
+// 条件の中では緑のメニュー表示になり、いずれも正しい変数レポーターにならない。
+// 演算子に隣接する項だけを (変数) に直す。「[変数 v] を (0) にする」のような変数選択
+// ブロックの正規ドロップダウンや、「(マウスポインター v) に触れた」「(自分自身 v) の…」は
+// 演算子に隣接しないので対象外。「(音量 v) > (10) のとき」のイベント帽子だけは比較に隣接
+// するため、行末が「のとき」のときは比較の変換をスキップして守る。
+function fixVariableDropdownInOperator(line) {
   const t = line.trim();
-  const isCondition = /^もし[\s　]/.test(t) || /まで(待つ|繰り返す)$/.test(t);
-  if (!isCondition) return line;
-
   let l = line;
-  // 左辺： [名前 v] OP  /  (名前 v) OP  →  (名前) OP
-  l = l.replace(/\[([^[\]]+?) v\] ([<=>]) /g, '($1) $2 ');
-  l = l.replace(/\(([^()]+?) v\) ([<=>]) /g, '($1) $2 ');
-  // 右辺： OP [名前 v]  /  OP (名前 v)  →  OP (名前)
-  l = l.replace(/ ([<=>]) \[([^[\]]+?) v\]/g, ' $1 ($2)');
-  l = l.replace(/ ([<=>]) \(([^()]+?) v\)/g, ' $1 ($2)');
+
+  // 算術演算子 + - * / の左右の項：演算の項にドロップダウン変数は入らないので常に変換
+  l = l.replace(/\[([^[\]]+?) v\] ([-+*/]) /g, '($1) $2 ');
+  l = l.replace(/\(([^()]+?) v\) ([-+*/]) /g, '($1) $2 ');
+  l = l.replace(/ ([-+*/]) \[([^[\]]+?) v\]/g, ' $1 ($2)');
+  l = l.replace(/ ([-+*/]) \(([^()]+?) v\)/g, ' $1 ($2)');
+
+  // 比較演算子 < = > の左右の項：イベント帽子「… のとき」だけ除外
+  if (!/のとき$/.test(t)) {
+    l = l.replace(/\[([^[\]]+?) v\] ([<=>]) /g, '($1) $2 ');
+    l = l.replace(/\(([^()]+?) v\) ([<=>]) /g, '($1) $2 ');
+    l = l.replace(/ ([<=>]) \[([^[\]]+?) v\]/g, ' $1 ($2)');
+    l = l.replace(/ ([<=>]) \(([^()]+?) v\)/g, ' $1 ($2)');
+  }
   return l;
 }
 
@@ -346,7 +352,7 @@ export function correctScratchBlocks(code) {
     l = fixMessageBlock(l);
     l = fixKeyPressedBlock(l);
     l = fixCloneBlock(l);
-    l = fixVariableDropdownInCondition(l);
+    l = fixVariableDropdownInOperator(l);
     l = fixNegatedCondition(l);
     l = fixChainedBoolean(l);
     l = fixReporterInVariableBlock(l);
