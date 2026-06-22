@@ -285,6 +285,11 @@ function fixChainedBoolean(line) {
   return out;
 }
 
+// 値が複合レポーター（演算・乱数・文字列操作など）かどうか
+function isCompoundReporter(value) {
+  return COMPOUND_REPORTER_PATTERNS.some(pattern => pattern.test(value));
+}
+
 // [変数 v] を VALUE にする  /  [変数 v] を VALUE ずつ変える
 // の VALUE が複合レポーターなら外側に () を追加
 function fixReporterInVariableBlock(line) {
@@ -294,21 +299,54 @@ function fixReporterInVariableBlock(line) {
   const [, prefix, value, suffix] = match;
   if (isAlreadyWrapped(value)) return line;
 
-  for (const pattern of COMPOUND_REPORTER_PATTERNS) {
-    if (pattern.test(value)) {
-      return `${prefix} (${value}) ${suffix}`;
-    }
+  if (isCompoundReporter(value)) {
+    return `${prefix} (${value}) ${suffix}`;
   }
   return line;
 }
 
+// 「スプライトの他のスクリプトを止める」を、後ろにブロックを繋げられる stack 形にする。
+// scratchblocks日本語版の「○○を止める」(CONTROL_STOP) は、ドロップダウンの値がロケールの
+// osis（'スプライトの他のスクリプトを止める'）と完全一致したときだけ stack になり、それ以外
+// （すべて／このスクリプト）は行き止まりの cap になる。判定は「値」そのものに対して行われ、
+// 日本語版では選択肢に動詞「を止める」まで含む1語が入る。
+// AIが出す「[このスプライトの他のスクリプト v] を止める」は、値が osis と一致せず（→ cap のまま）
+// かつ「を止める」が独立ラベルになって繋げられない。値ごと正規化して stack に直す。
+// 「すべての音を止める」(SOUND_STOPALLSOUNDS) は別ブロックなので除外する。
+function fixStopOtherScripts(line) {
+  const t = line.trim();
+  if (!/止める$/.test(t)) return line;
+  if (t.includes('音')) return line;            // 「すべての音を止める」は対象外
+  if (!t.includes('他のスクリプト')) return line; // 「他のスクリプト」を含むものだけが stack
+  return '[スプライトの他のスクリプトを止める v]';
+}
+
+// 「○○度に向ける」(MOTION_POINTINDIRECTION) の誤記を補正する。
+// 日本語版の正しいブロックは「(値) 度に向ける」。AIは座標ブロック（x座標を○にする）に
+// 引きずられて「向きを (値) 度にする」と書きがちで、そのブロックは存在せず赤ブロックになる。
+// また演算を引数にするとき「(180) - (向き) 度に向ける」のように外側の () を落とすと、
+// 単一の引数として解釈されず赤ブロックになるため、演算全体を () で包む。
+function fixPointInDirection(line) {
+  let t = line.trim();
+
+  // 「向きを (値) 度にする」→「(値) 度に向ける」へ言い換える
+  const wrong = t.match(/^向きを (.+?) 度に(?:する|向ける)$/);
+  if (wrong) t = `${wrong[1].trim()} 度に向ける`;
+
+  const m = t.match(/^(.+?) 度に向ける$/);
+  if (!m) return line;
+
+  const value = m[1].trim();
+  if (!isAlreadyWrapped(value) && isCompoundReporter(value)) {
+    return `(${value}) 度に向ける`;
+  }
+  return `${value} 度に向ける`;
+}
+
 // 既知の誤ったブロック名 → 正しい記法への直接置換
 const KNOWN_WRONG_BLOCKS = [
-  // stopブロックの誤った書き方
-  {
-    wrong: /他のスプライトの他のスクリプトを止める/g,
-    right: '[このスプライトの他のスクリプト v] を止める',
-  },
+  // stopブロックの「他のスクリプト」系は行ごとに fixStopOtherScripts で正規化するため
+  // ここでは扱わない（cap ではなく stack にする必要があるため）。
   // コスチューム名プレースホルダー
   {
     wrong: /コスチューム名(?!\s*v\])/g,
@@ -352,7 +390,9 @@ export function correctScratchBlocks(code) {
     l = fixMessageBlock(l);
     l = fixKeyPressedBlock(l);
     l = fixCloneBlock(l);
+    l = fixStopOtherScripts(l);
     l = fixVariableDropdownInOperator(l);
+    l = fixPointInDirection(l);
     l = fixNegatedCondition(l);
     l = fixChainedBoolean(l);
     l = fixReporterInVariableBlock(l);
