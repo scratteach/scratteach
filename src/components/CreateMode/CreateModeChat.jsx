@@ -7,6 +7,7 @@ import { CREATE_MODE_SYSTEM_PROMPT } from '../../prompts/createModePrompt.js';
 import { detectGenre, buildGenreGenerationAddendum, buildGenreQARubric } from '../../prompts/genreTemplates.js';
 import { useCreateSession } from '../../hooks/useCreateSession.js';
 import { exportSessionToPDF } from '../../lib/pdfExport.js';
+import { correctScratchBlocks } from '../../lib/scratchBlocksCorrector.js';
 
 const formatText = (text) => {
   if (!text) return null;
@@ -455,6 +456,33 @@ const CreateModeChat = ({ onOpenSettings }) => {
     }
   }, [callAPI, applyRebuildResult]);
 
+  // まとめ直しの「保証ステップ」：AI再生成を待たず・AIに頼らず、決定論コレクターを
+  // 現在の全スプライトのブロックに直接かけて、赤ブロックを正しいデフォルトブロックに
+  // その場で置き換える。AIが同じ記法ミスを繰り返しても、ここで確実に直った形を残せる。
+  // 最新のgeneratingメッセージを corrected な全スプライト＋replaceAll で上書きする。
+  const applyCorrectorLocally = useCallback(() => {
+    const current = mergeGeneratingSprites(
+      messagesRef.current.filter(
+        m => m.role === 'assistant' && m.parsed?.phase === 'generating' && m.parsed?.sprites?.length
+      )
+    );
+    if (!current.length) return;
+    const corrected = current.map(s => ({ ...s, blocks: correctScratchBlocks(s.blocks || '') }));
+
+    setMessages(prev => {
+      const idx = [...prev].map((m, i) => ({ m, i }))
+        .filter(({ m }) => m.role === 'assistant' && m.parsed?.phase === 'generating')
+        .at(-1)?.i;
+      if (idx == null) return prev;
+      const updated = [...prev];
+      updated[idx] = {
+        ...updated[idx],
+        parsed: { ...updated[idx].parsed, sprites: corrected, replaceAll: true },
+      };
+      return updated;
+    });
+  }, []);
+
   // 手動再構築（「ブロックをまとめ直す」＝赤ブロック修正＋古い残骸の整理を兼ねるクリーン再構築）
   // 現在のゲームに必要なスプライト一式をフル生成し、結果でまるごと置き換える（replaceAll）。
   const handleManualRebuild = useCallback(async () => {
@@ -463,6 +491,9 @@ const CreateModeChat = ({ onOpenSettings }) => {
     autoFixAttemptsRef.current = 0;
     autoFixFiredRef.current = true;
     setIsAutoFixing(true);
+
+    // まずAIに頼らず決定論補正をかけて赤ブロックを確実に直す（AIが失敗してもこの結果が残る）。
+    applyCorrectorLocally();
 
     const names = currentSpriteNames();
     const namesLine = names.length
@@ -482,7 +513,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
       autoFixFiredRef.current = false;
       setIsAutoFixing(false);
     }
-  }, [callAPI, applyRebuildResult, isAutoFixing, isLoading]);
+  }, [callAPI, applyRebuildResult, applyCorrectorLocally, isAutoFixing, isLoading]);
 
   // 動作QAゲート（意味ゲート）：generating結果が出たあとに別パスのQA AIで採点し、
   // ジャンルの必須メカニクスが欠落していたら1回だけ自動補完して作り直す。
