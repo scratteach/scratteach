@@ -1,6 +1,8 @@
 // ルールベースのscratchblocks自動補正
 // AIが生成した記法の誤りを、AI再生成に頼らず直接修正する
 
+import { hoistLoopInit } from './scratchLogicGate.js';
+
 // 単純な引数パターン: (数値) または (変数名) — 入れ子なし
 const SIMPLE_ARG = String.raw`\([^()[\]]+\)`;
 
@@ -402,6 +404,12 @@ export function correctScratchBlocks(code) {
     return l;
   });
   corrected = fixedLines.join('\n');
+
+  // Step 3: 構造の決定論補正（赤ブロックではなく「動かない構造」）。
+  // グリッド初期化（座標の絶対セット）が繰り返しの中にあって毎回リセットされ、
+  // 1列／1か所にしか並ばないバグを、初期化を繰り返しの外へ追い出して直す。
+  // 描画・PDF・まとめ直しの全経路に常時かかり、再生成で再発しても確実に直る。
+  corrected = hoistLoopInit(corrected);
 
   return corrected;
 }

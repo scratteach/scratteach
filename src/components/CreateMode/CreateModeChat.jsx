@@ -8,6 +8,7 @@ import { detectGenre, buildGenreGenerationAddendum, buildGenreQARubric } from '.
 import { useCreateSession } from '../../hooks/useCreateSession.js';
 import { exportSessionToPDF } from '../../lib/pdfExport.js';
 import { correctScratchBlocks } from '../../lib/scratchBlocksCorrector.js';
+import { detectCollisionRace } from '../../lib/scratchLogicGate.js';
 
 const formatText = (text) => {
   if (!text) return null;
@@ -515,20 +516,16 @@ const CreateModeChat = ({ onOpenSettings }) => {
     }
   }, [callAPI, applyRebuildResult, applyCorrectorLocally, isAutoFixing, isLoading]);
 
-  // 動作QAゲート（意味ゲート）：generating結果が出たあとに別パスのQA AIで採点し、
-  // ジャンルの必須メカニクスが欠落していたら1回だけ自動補完して作り直す。
+  // 動作QAゲート：generating結果が出たあとに2段で採点する。
+  //   ① 決定論ロジックゲート（detectCollisionRace）＝ジャンル非依存・APIキー不要・fail-openなし。
+  //      当たり判定の競合（消滅が先に走って反射が出ず貫通する形）を構造から確実に検出する。
+  //   ② LLM意味ゲート（runGameQACheck）＝ジャンル検出時のみ。必須メカニクスの欠落を採点。
+  //  どちらかが問題を挙げたら、両者の指摘をまとめて1回だけ作り直す。
+  //  ※グリッド初期化のループ内巻き込み（1列バグ）は描画/補正の決定論パスで常時直すためここでは扱わない。
   // 赤ブロック検出（構文ゲート）とは独立。1ユーザーターンにつき最大1回（qaFiredRefで制御）。
   // newGenMessage: 直前にappendしたgenerating結果（messagesRefにはまだ反映されていないため明示的に渡す）
   const runQAGate = useCallback(async (newGenMessage) => {
     if (qaFiredRef.current) return;
-
-    const genreText = [...messagesRef.current.map(m => m.content || ''), newGenMessage?.content || ''].join('\n');
-    const genre = detectGenre(genreText);
-    if (!genre) return; // 未対応ジャンルはQAしない（フォールバック）
-
-    const apiKey = localStorage.getItem('scratteach_api_key');
-    const model = localStorage.getItem('scratteach_model') || 'gemini-3.1-flash-lite';
-    if (!apiKey) return;
 
     // 現在の完成形＝過去のgenerating（ref）＋今回の新メッセージ をスプライト名で畳み込む
     const priorGen = messagesRef.current.filter(
@@ -541,33 +538,48 @@ const CreateModeChat = ({ onOpenSettings }) => {
 
     qaFiredRef.current = true;
 
-    try {
-      const qa = await runGameQACheck(buildGenreQARubric(genre), merged, apiKey, model);
-      const problems = [...(qa.missing || []), ...(qa.issues || [])];
-      if (qa.ok || !problems.length) return; // 合格ならそのまま表示
+    // ① 決定論ロジックゲート（常時）
+    const raceIssues = detectCollisionRace(merged);
 
-      // 欠落を指摘して1回だけ作り直し
-      setIsAutoFixing(true);
+    // ② LLM意味ゲート（ジャンル検出＋APIキーがあるときだけ）
+    const genreText = [...messagesRef.current.map(m => m.content || ''), newGenMessage?.content || ''].join('\n');
+    const genre = detectGenre(genreText);
+    const apiKey = localStorage.getItem('scratteach_api_key');
+    const model = localStorage.getItem('scratteach_model') || 'gemini-3.1-flash-lite';
+    let llmProblems = [];
+    if (genre && apiKey) {
       try {
-        const names = merged.map(s => s.name);
-        const namesLine = names.length
-          ? `\n現在のスプライト：${names.join('、')}。\nこれらを同じ名前のままsprites[]に入れて返してください（修正のないスプライトも省略せず含める）。`
-          : '';
-        const detail = problems.map(p => `・${p}`).join('\n');
-        const correctionText =
-          `【動作チェックの指摘】\nこのゲームには次の不足・問題があり、まだゲームとして成立していません：\n${detail}${namesLine}\n\n` +
-          `これらをすべて満たすよう、generatingフェーズで全スプライトのブロックを作り直してください。` +
-          `特に上で指摘された必須メカニクスは必ずブロックとして実装すること。` +
-          `message には【Scratchで先に準備してください】ガイド（STEP5の形式）を必ず含めること。`;
-        const result = await callAPI(correctionText, null, messagesRef.current);
-        if (result?.parsed?.phase === 'generating' && result.parsed.sprites) {
-          applyRebuildResult(result);
-        }
-      } finally {
-        setIsAutoFixing(false);
+        const qa = await runGameQACheck(buildGenreQARubric(genre), merged, apiKey, model);
+        if (!qa.ok) llmProblems = [...(qa.missing || []), ...(qa.issues || [])];
+      } catch (err) {
+        console.error('QA gate (LLM) failed:', err);
+      }
+    }
+
+    const problems = [...raceIssues, ...llmProblems];
+    if (!problems.length) return; // 合格ならそのまま表示
+
+    // 指摘をまとめて1回だけ作り直し
+    setIsAutoFixing(true);
+    try {
+      const names = merged.map(s => s.name);
+      const namesLine = names.length
+        ? `\n現在のスプライト：${names.join('、')}。\nこれらを同じ名前のままsprites[]に入れて返してください（修正のないスプライトも省略せず含める）。`
+        : '';
+      const detail = problems.map(p => `・${p}`).join('\n');
+      const correctionText =
+        `【動作チェックの指摘】\nこのゲームには次の不足・問題があり、まだゲームとして成立していません：\n${detail}${namesLine}\n\n` +
+        `これらをすべて満たすよう、generatingフェーズで全スプライトのブロックを作り直してください。` +
+        `特に上で指摘された必須メカニクスは必ずブロックとして実装すること。` +
+        `message には【Scratchで先に準備してください】ガイド（STEP5の形式）を必ず含めること。`;
+      const result = await callAPI(correctionText, null, messagesRef.current);
+      if (result?.parsed?.phase === 'generating' && result.parsed.sprites) {
+        applyRebuildResult(result);
       }
     } catch (err) {
-      console.error('QA gate failed:', err);
+      console.error('QA gate (rebuild) failed:', err);
+    } finally {
+      setIsAutoFixing(false);
     }
   }, [callAPI, applyRebuildResult]);
 
