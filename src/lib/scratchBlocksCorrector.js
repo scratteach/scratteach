@@ -348,6 +348,21 @@ function fixPointInDirection(line) {
   return `${value} 度に向ける`;
 }
 
+// 「度回す」(MOTION_TURNRIGHT / MOTION_TURNLEFT) の方向欠落を補正する。
+// 日本語版は右回り・左回りでラベルが同じ「度回す」のため、scratchblocks記法では先頭に
+// 方向（右に／左に／時計回りに／反時計回りに）か回転アイコン(↻/↺)が必要。AIは「(180) 度回す」と
+// 方向を落として出しがちで、どちらのブロックにも一致せず赤ブロックになる。
+// 方向の無い「(値) 度回す」に既定で「右に」を補う（180°など左右同値の場面が多く、右で統一する）。
+// EV3モーター等の「○秒間回す」、座標の「度に向ける」は別ブロックなので対象外。
+function fixTurnBlock(line) {
+  const t = line.trim();
+  if (!/度回す$/.test(t)) return line;
+  if (/秒間回す$/.test(t)) return line;                       // モーター系は対象外
+  if (/^(右に|左に|時計回りに|反時計回りに)\s/.test(t)) return line; // すでに方向あり
+  if (/^[↻↺]\s/.test(t)) return line;                        // 回転アイコンあり
+  return `右に ${t}`;
+}
+
 // 既知の誤ったブロック名 → 正しい記法への直接置換
 const KNOWN_WRONG_BLOCKS = [
   // stopブロックの「他のスクリプト」系は行ごとに fixStopOtherScripts で正規化するため
@@ -398,6 +413,7 @@ export function correctScratchBlocks(code) {
     l = fixStopOtherScripts(l);
     l = fixVariableDropdownInOperator(l);
     l = fixPointInDirection(l);
+    l = fixTurnBlock(l);
     l = fixNegatedCondition(l);
     l = fixChainedBoolean(l);
     l = fixReporterInVariableBlock(l);
