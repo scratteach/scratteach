@@ -421,6 +421,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
     `条件式で「かつ」「または」を2回以上横につなげている箇所は、必ず「もし〜なら／でなければ」の入れ子に分解してください。\n` +
     `特にじゃんけんの勝敗判定は「または」を一切使わず、入れ子のif-elseだけで全9パターンを表現してください。\n` +
     `メッセージ名は必ず [名前 v] のドロップダウン記法で書いてください。\n\n` +
+    `⚠️ 赤ブロックの箇所だけを直し、すでに正しく動いている部分（指摘外のスプライト・ブロック）は1ブロックも変えず前回と同じ内容で返すこと。整理や書き換えで動いていた機能を壊さないこと。\n` +
     `Scratch 3.0の公式デフォルトブロックのみを使い、generatingフェーズで全スプライトのブロックを作り直してください。message には【Scratchで先に準備してください】ガイドを必ず含めること。`;
 
   const handleAutoFix = useCallback(async (invalidList) => {
@@ -571,6 +572,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
         `【動作チェックの指摘】\nこのゲームには次の不足・問題があり、まだゲームとして成立していません：\n${detail}${namesLine}\n\n` +
         `これらをすべて満たすよう、generatingフェーズで全スプライトのブロックを作り直してください。` +
         `特に上で指摘された必須メカニクスは必ずブロックとして実装すること。` +
+        `⚠️ ただし指摘された箇所だけを直し、すでに正しく動いている部分は1ブロックも変えず前回と同じ内容で返すこと（整理・書き換えで動いていた反射や当たり判定を壊さない）。` +
         `message には【Scratchで先に準備してください】ガイド（STEP5の形式）を必ず含めること。`;
       const result = await callAPI(correctionText, null, messagesRef.current);
       if (result?.parsed?.phase === 'generating' && result.parsed.sprites) {
