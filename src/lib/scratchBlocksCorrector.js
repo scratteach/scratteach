@@ -321,7 +321,14 @@ function fixReporterInVariableBlock(line) {
     value = value.slice(1, -1).trim();
   }
 
-  if (!isAlreadyWrapped(value) && isCompoundReporter(value)) {
+  // トップレベルに演算子がある値は、項が入れ子でも必ず外側 () で包む。
+  // COMPOUND_REPORTER_PATTERNS は単純な項（入れ子なし）しか見ないため、
+  // 「((ボール v) の [x座標 v]) - (x座標)」のような入れ子の項を持つ演算が漏れて赤くなる
+  const hasTopLevelArith = [' + ', ' - ', ' * ', ' / '].some(
+    op => splitTopLevel(value, op).length > 1,
+  );
+
+  if (!isAlreadyWrapped(value) && (hasTopLevelArith || isCompoundReporter(value))) {
     value = `(${value})`;
   }
   return `${prefix} ${value} ${suffix}`;
@@ -489,6 +496,25 @@ function fixSensingOfFreeform(code) {
   return out;
 }
 
+// 「〇 の 〇」型レポーターのドロップダウン括弧形状を公式形に統一する。
+// 数学関数は「[絶対値 v] の (値)」＝関数名が角括弧、sensing_of は「((ボール v) の [x座標 v])」＝
+// スプライト名が丸・プロパティが角。AIは丸と角を混同して「(絶対値 v) の (差x)」
+// 「((ボール v) の (x座標 v))」「([ボール v] の [x座標 v])」等と書きがちで、
+// ハッシュが偶然一致して別ブロック（調べるの「〇〇の値」）に化けたり、外側括弧の
+// 欠落と重なって赤ブロックになったりする。メニュー値が既知のものだけ形を直す。
+const MATH_FUNC_NAMES = '(?:絶対値|切り下げ|切り上げ|平方根|sin|cos|tan|asin|acos|atan|ln|log|e \\^|10 \\^)';
+
+function fixOfReporterDropdownShape(line) {
+  let l = line;
+  // (絶対値 v) の → [絶対値 v] の （関数名は角括弧）
+  l = l.replace(new RegExp(`\\((${MATH_FUNC_NAMES})\\s+v\\)\\s*の\\s*\\(`, 'g'), '[$1 v] の (');
+  // (ボール v) の (x座標 v) → (ボール v) の [x座標 v] （プロパティは角括弧）
+  l = l.replace(new RegExp(`( v\\))\\s*の\\s*\\((${SENSING_OF_PROPS})\\s+v\\)`, 'g'), '$1 の [$2 v]');
+  // [ボール v] の [x座標 v] → (ボール v) の [x座標 v] （スプライト名は丸括弧）
+  l = l.replace(new RegExp(`\\[([^[\\]]+?)\\s+v\\]\\s*の\\s*(\\[(?:${SENSING_OF_PROPS})\\s+v\\])`, 'g'), '($1 v) の $2');
+  return l;
+}
+
 // 比較（< = >）の左右で演算レポーターの外側 () が抜けた形を補正する。
 // 「もし <([絶対値 v] の (差x)) * (15) > ([絶対値 v] の (差y)) * (24)> なら」のように
 // 比較の項が「グループ 演算子 グループ」の裸の連鎖だと、行全体が1つの未知ブロックと
@@ -597,6 +623,7 @@ export function correctScratchBlocks(code) {
     l = fixVariableDropdownInOperator(l);
     l = fixPointInDirection(l);
     l = fixTurnBlock(l);
+    l = fixOfReporterDropdownShape(l);
     l = fixPostfixMathFunc(l);
     l = fixNegatedCondition(l);
     l = fixChainedBoolean(l);
