@@ -31,10 +31,9 @@ const COMPOUND_REPORTER_PATTERNS = [
   new RegExp(`^(${SIMPLE_ARG}) を (${SIMPLE_ARG}) で割った余り$`),
   // 四捨五入: (a) を四捨五入
   new RegExp(`^(${SIMPLE_ARG}) を四捨五入$`),
-  // 数学関数: [絶対値 v] の (a)（引数は入れ子の演算でもよい）
-  /^\[.+? v\] の \(.+\)$/,
-  // 他スプライトの値: (スプライト v) の [x座標 v]
-  /^\(.+? v\) の \[.+? v\]$/,
+  // 「〇 の 〇」型（値が入れ子でもよい）：
+  // 数学関数（後置き）: (a) の [絶対値 v] ／ 他スプライトの値: (スプライト v) の [x座標 v]
+  /^\(.+\) の \[.+? v\]$/,
   // 文字列結合: (a) と (b)
   new RegExp(`^(${SIMPLE_ARG}) と (${SIMPLE_ARG})$`),
   // 文字列長さ: (a) の長さ
@@ -425,17 +424,53 @@ function fixTurnBlock(line) {
   return `右に ${t}`;
 }
 
-// 数学関数の後置き記法を前置きの公式形に直す。
-// 正しい ja 表記は「([絶対値 v] の (値))」（関数名が先のドロップダウン）。AIは日本語の
-// 語順につられて「((A) - (B)) の絶対値」と後置きで書きがちで、ハッシュ不一致で赤ブロックになる。
-// ブロック崩しの「x距離とy距離の絶対値を比べて反射軸を決める」条件が赤くなるのが典型。
-// 「〜の絶対値」の直前にある () グループを、演算子（+ - * /）で繋がった連鎖ごと引数として
-// 巻き込み（日本語の「〜の絶対値」は直前の式全体に掛かる読みが自然）、前置き形に組み替える。
+// 数学関数ブロックを公式の後置き形「((値) の [絶対値 v])」に統一する。
+// 日本語版 Scratch の OPERATORS_MATHOP は「%2 の %1」＝値が先・関数名のドロップダウンが後ろ
+// （本物のエディタで「( ) の [絶対値 ▼]」）。AIが出す崩れは3種：
+//   ① 前置き「[絶対値 v] の (値)」「(絶対値 v) の (値)」…英語の語順。scratchblocksでは
+//      偶然緑に描かれてしまうが、本物のブロックと配置が逆で子どもが組めない。
+//   ② 後置きだが丸ドロップダウン「(値) の (絶対値 v)」…角括弧に直すだけでよい。
+//   ③ 関数名が裸「(値) の絶対値」…ハッシュ不一致で赤ブロックになる。
+// ③は「〜の絶対値」の直前の () グループを、演算子（+ - * /）で繋がった連鎖ごと値として
+// 巻き込む（日本語の「〜の絶対値」は直前の式全体に掛かる読みが自然）。
 // 変数名に関数名を含むもの（例：[速さの絶対値 v]）は直前が ) でないため対象にならない。
 const POSTFIX_MATH_FUNCS = ['絶対値', '切り下げ', '切り上げ', '平方根'];
 
-function fixPostfixMathFunc(line) {
+// s[openIdx] の '(' に対応する閉じ括弧の位置を返す
+function matchCloseParen(s, openIdx) {
+  let depth = 0;
+  for (let i = openIdx; i < s.length; i++) {
+    if (s[i] === '(') depth++;
+    else if (s[i] === ')') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function fixMathFuncForm(line) {
   let l = line;
+
+  // ① 前置き形 [絶対値 v] の (値) / (絶対値 v) の (値) → (値) の [絶対値 v]
+  const prefixRe = new RegExp(
+    `[([](${POSTFIX_MATH_FUNCS.join('|')})\\s+v[)\\]]\\s*の\\s*\\(`,
+  );
+  for (let m; (m = l.match(prefixRe)); ) {
+    const openIdx = m.index + m[0].length - 1;
+    const closeIdx = matchCloseParen(l, openIdx);
+    if (closeIdx === -1) break;
+    const group = l.slice(openIdx, closeIdx + 1);
+    l = l.slice(0, m.index) + `${group} の [${m[1]} v]` + l.slice(closeIdx + 1);
+  }
+
+  // ② 後置きの丸ドロップダウン (値) の (絶対値 v) → (値) の [絶対値 v]
+  l = l.replace(
+    new RegExp(`の\\s*\\((${POSTFIX_MATH_FUNCS.join('|')})\\s+v\\)`, 'g'),
+    'の [$1 v]',
+  );
+
+  // ③ 裸の関数名 (値) の絶対値 → (値) の [絶対値 v]
   let replaced = true;
   while (replaced) {
     replaced = false;
@@ -444,8 +479,8 @@ function fixPostfixMathFunc(line) {
       let i;
       while ((i = l.indexOf(fn, from)) !== -1) {
         from = i + fn.length;
-        // 正しいドロップダウン形「[絶対値 v] の …」はスキップ
-        if (l.startsWith(' v]', i + fn.length)) continue;
+        // ドロップダウン形（[絶対値 v] / (絶対値 v)）はスキップ
+        if (l.startsWith(' v]', i + fn.length) || l.startsWith(' v)', i + fn.length)) continue;
         // 直前が「の」で、その前が閉じ括弧 ) であること（後置き形の判定）
         let j = i - 1;
         while (j >= 0 && l[j] === ' ') j--;
@@ -455,7 +490,7 @@ function fixPostfixMathFunc(line) {
         if (l[j] !== ')') continue;
 
         // ) から対応する ( まで戻ってグループを取り、さらに前が「演算子 グループ」の
-        // 並びなら連鎖ごと引数に巻き込む（(A) - (B) の絶対値 → 差全体の絶対値）
+        // 並びなら連鎖ごと値に巻き込む（(A) - (B) の絶対値 → 差全体の絶対値）
         const matchOpen = (end) => {
           let depth = 0;
           for (let k = end; k >= 0; k--) {
@@ -484,7 +519,7 @@ function fixPostfixMathFunc(line) {
         }
         const arg = l.slice(start, j + 1);
         const wrapped = hasChain ? `(${arg})` : arg;
-        l = l.slice(0, start) + `[${fn} v] の ${wrapped}` + l.slice(i + fn.length);
+        l = l.slice(0, start) + `${wrapped} の [${fn} v]` + l.slice(i + fn.length);
         replaced = true;
         break;
       }
@@ -522,18 +557,13 @@ function fixSensingOfFreeform(code) {
   return out;
 }
 
-// 「〇 の 〇」型レポーターのドロップダウン括弧形状を公式形に統一する。
-// 数学関数は「[絶対値 v] の (値)」＝関数名が角括弧、sensing_of は「((ボール v) の [x座標 v])」＝
-// スプライト名が丸・プロパティが角。AIは丸と角を混同して「(絶対値 v) の (差x)」
-// 「((ボール v) の (x座標 v))」「([ボール v] の [x座標 v])」等と書きがちで、
-// ハッシュが偶然一致して別ブロック（調べるの「〇〇の値」）に化けたり、外側括弧の
-// 欠落と重なって赤ブロックになったりする。メニュー値が既知のものだけ形を直す。
-const MATH_FUNC_NAMES = '(?:絶対値|切り下げ|切り上げ|平方根|sin|cos|tan|asin|acos|atan|ln|log|e \\^|10 \\^)';
-
+// sensing_of（〇〇の値）レポーターのドロップダウン括弧形状を公式形に統一する。
+// 正しくは「((ボール v) の [x座標 v])」＝スプライト名が丸・プロパティが角。
+// AIは丸と角を混同して「((ボール v) の (x座標 v))」「([ボール v] の [x座標 v])」等と
+// 書きがちで、外側括弧の欠落と重なると赤ブロックになる。メニュー値が既知のものだけ形を直す。
+// 数学関数（絶対値等）の形は fixMathFuncForm が後置き形へ正規化するのでここでは扱わない。
 function fixOfReporterDropdownShape(line) {
   let l = line;
-  // (絶対値 v) の → [絶対値 v] の （関数名は角括弧）
-  l = l.replace(new RegExp(`\\((${MATH_FUNC_NAMES})\\s+v\\)\\s*の\\s*\\(`, 'g'), '[$1 v] の (');
   // (ボール v) の (x座標 v) → (ボール v) の [x座標 v] （プロパティは角括弧）
   l = l.replace(new RegExp(`( v\\))\\s*の\\s*\\((${SENSING_OF_PROPS})\\s+v\\)`, 'g'), '$1 の [$2 v]');
   // [ボール v] の [x座標 v] → (ボール v) の [x座標 v] （スプライト名は丸括弧）
@@ -650,7 +680,7 @@ export function correctScratchBlocks(code) {
     l = fixPointInDirection(l);
     l = fixTurnBlock(l);
     l = fixOfReporterDropdownShape(l);
-    l = fixPostfixMathFunc(l);
+    l = fixMathFuncForm(l);
     l = fixNegatedCondition(l);
     l = fixChainedBoolean(l);
     l = fixArithChainInComparison(l);

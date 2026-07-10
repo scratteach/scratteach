@@ -1,12 +1,72 @@
 import { SYSTEM_PROMPT, SYSTEM_PROMPT_EN } from './systemPrompt.js';
+import { correctScratchBlocks } from './scratchBlocksCorrector.js';
 
 export const getSystemPrompt = (blockLang) =>
   blockLang === 'en' ? SYSTEM_PROMPT_EN : SYSTEM_PROMPT;
 
+// 生成ブロックから実際に使っている変数名・メッセージ名を機械抽出する。
+// 変数はセット系ブロック（を〜にする／ずつ変える／表示・隠す）の左辺だけを拾う
+// （読み取りの (変数) は組み込みレポーターと区別できないため対象にしない。
+//   生成コードで使う変数はほぼ必ずどこかでセットされるので実用上これで拾える）。
+const extractUsedNames = (sprites) => {
+  const vars = new Set();
+  const msgs = new Set();
+  for (const s of sprites || []) {
+    const code = correctScratchBlocks(s.blocks || '');
+    for (const raw of code.split('\n')) {
+      const line = raw.trim();
+      let m = line.match(/^\[(.+?) v\] を .+(にする|ずつ変える)$/);
+      if (m) vars.add(m[1]);
+      m = line.match(/^変数 \[(.+?) v\] を(表示する|隠す)$/);
+      if (m) vars.add(m[1]);
+      for (const mm of line.matchAll(/\((.+?) v\) を送(?:る|って待つ)/g)) msgs.add(mm[1]);
+      m = line.match(/^\((.+?) v\) を受け取ったとき$/);
+      if (m) msgs.add(m[1]);
+    }
+  }
+  return { vars, msgs };
+};
+
+// 事前準備リスト（message内の■変数／■メッセージ）の漏れを決定論で補完する。
+// AIは生成の途中で導入した作業用変数（差x・差y等）を、先に書いた準備リストへ
+// 載せ忘れることがある。ブロックから抽出した名前が message に見当たらなければ、
+// 「準備ができたら〜」の案内行の前に追記する（プロンプト任せにしない）。
+export const completePreparationList = (parsed) => {
+  if (!parsed || parsed.phase !== 'generating') return parsed;
+  if (!Array.isArray(parsed.sprites) || parsed.sprites.length === 0) return parsed;
+  const message = parsed.message || '';
+  const { vars, msgs } = extractUsedNames(parsed.sprites);
+  const missingVars = [...vars].filter(v => !message.includes(v));
+  const missingMsgs = [...msgs].filter(v => !message.includes(v));
+  if (missingVars.length === 0 && missingMsgs.length === 0) return parsed;
+
+  const lines = ['', '⚠️ 自動チェック：ブロックで使っているのに準備リストに無い名前を見つけました。こちらも作ってください。'];
+  if (missingVars.length) {
+    lines.push('■ 追加の変数（コードタブ→変数→変数を作る／全体用）');
+    for (const v of missingVars) lines.push(`・${v}　→ ゲーム画面に表示：□（非表示）`);
+  }
+  if (missingMsgs.length) {
+    lines.push('■ 追加のメッセージ');
+    for (const v of missingMsgs) lines.push(`・${v}`);
+  }
+  const section = lines.join('\n');
+
+  const marker = message.lastIndexOf('準備ができたら');
+  let newMessage;
+  if (marker !== -1) {
+    const lineStart = message.lastIndexOf('\n', marker);
+    const pos = lineStart === -1 ? marker : lineStart;
+    newMessage = `${message.slice(0, pos)}\n${section}\n${message.slice(pos)}`;
+  } else {
+    newMessage = `${message}\n${section}`;
+  }
+  return { ...parsed, message: newMessage };
+};
+
 export const parseCreateModeResponse = (text) => {
   try {
     const clean = text.replace(/^```json\s*|\s*```$/g, '').trim();
-    return JSON.parse(clean);
+    return completePreparationList(JSON.parse(clean));
   } catch {
     return { phase: 'planning', message: text, question: null, spec: {}, sprites: null };
   }
