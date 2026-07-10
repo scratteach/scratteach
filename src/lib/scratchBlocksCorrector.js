@@ -305,6 +305,32 @@ function isCompoundReporter(value) {
   return COMPOUND_REPORTER_PATTERNS.some(pattern => pattern.test(value));
 }
 
+// 変数セットの動詞欠落を補正する。
+// 「[差x v] を (((ボール v) の [x座標 v]) - (x座標))」のように、値が長い式のとき
+// AIは行末の「にする」を落としがちで、DATA_SETVARIABLETO に一致せず赤ブロックになる
+// （値の式は正しく緑で描かれるのに、外側のセットブロックだけ赤くなる形）。
+// 「[〇〇 v] を 値」で行が終わり、値が括弧の釣り合った完結形のときだけ「にする」を補う。
+// メッセージ（を送る）は fixMessageBlock で丸括弧化済み・リスト操作は語順が違うため誤爆しない。
+function isBracketBalanced(s) {
+  let depth = 0;
+  for (const ch of s) {
+    if (ch === '(' || ch === '[') depth++;
+    else if (ch === ')' || ch === ']') depth--;
+    if (depth < 0) return false;
+  }
+  return depth === 0;
+}
+
+function fixMissingSetVerb(line) {
+  const m = line.match(/^(\[.+? v\]) を (.+)$/);
+  if (!m) return line;
+  const value = m[2].trim();
+  if (/(にする|ずつ変える|変える|する)$/.test(value)) return line; // 動詞あり（言い換え含む）
+  if (!value.endsWith(')') && !value.endsWith(']')) return line;    // 値で完結していない
+  if (!isBracketBalanced(value)) return line;
+  return `${m[1]} を ${value} にする`;
+}
+
 // [変数 v] を VALUE にする  /  [変数 v] を VALUE ずつ変える
 // の VALUE が複合レポーターなら外側に () を追加
 function fixReporterInVariableBlock(line) {
@@ -628,6 +654,7 @@ export function correctScratchBlocks(code) {
     l = fixNegatedCondition(l);
     l = fixChainedBoolean(l);
     l = fixArithChainInComparison(l);
+    l = fixMissingSetVerb(l);
     l = fixReporterInVariableBlock(l);
     return l;
   });
