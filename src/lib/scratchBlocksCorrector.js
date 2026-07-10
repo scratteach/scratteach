@@ -31,8 +31,10 @@ const COMPOUND_REPORTER_PATTERNS = [
   new RegExp(`^(${SIMPLE_ARG}) を (${SIMPLE_ARG}) で割った余り$`),
   // 四捨五入: (a) を四捨五入
   new RegExp(`^(${SIMPLE_ARG}) を四捨五入$`),
-  // 数学関数: [abs v] の (a)
-  /^\[.+? v\] の \([^()]+\)$/,
+  // 数学関数: [絶対値 v] の (a)（引数は入れ子の演算でもよい）
+  /^\[.+? v\] の \(.+\)$/,
+  // 他スプライトの値: (スプライト v) の [x座標 v]
+  /^\(.+? v\) の \[.+? v\]$/,
   // 文字列結合: (a) と (b)
   new RegExp(`^(${SIMPLE_ARG}) と (${SIMPLE_ARG})$`),
   // 文字列長さ: (a) の長さ
@@ -309,13 +311,20 @@ function fixReporterInVariableBlock(line) {
   const match = line.match(/^(\[.+? v\] を) (.+?) (にする|ずつ変える)$/);
   if (!match) return line;
 
-  const [, prefix, value, suffix] = match;
-  if (isAlreadyWrapped(value)) return line;
+  const prefix = match[1];
+  const suffix = match[3];
+  let value = match[2];
 
-  if (isCompoundReporter(value)) {
-    return `${prefix} (${value}) ${suffix}`;
+  // 二重の外側括弧を剥がす：((コスチュームの [名前 v])) のように、すでに自前の () を持つ
+  // レポーターへさらに () を重ねるとハッシュ不一致で赤ブロックになる
+  while (isAlreadyWrapped(value) && isAlreadyWrapped(value.slice(1, -1).trim())) {
+    value = value.slice(1, -1).trim();
   }
-  return line;
+
+  if (!isAlreadyWrapped(value) && isCompoundReporter(value)) {
+    value = `(${value})`;
+  }
+  return `${prefix} ${value} ${suffix}`;
 }
 
 // 「スプライトの他のスクリプトを止める」を、後ろにブロックを繋げられる stack 形にする。
@@ -383,6 +392,156 @@ function fixTurnBlock(line) {
   return `右に ${t}`;
 }
 
+// 数学関数の後置き記法を前置きの公式形に直す。
+// 正しい ja 表記は「([絶対値 v] の (値))」（関数名が先のドロップダウン）。AIは日本語の
+// 語順につられて「((A) - (B)) の絶対値」と後置きで書きがちで、ハッシュ不一致で赤ブロックになる。
+// ブロック崩しの「x距離とy距離の絶対値を比べて反射軸を決める」条件が赤くなるのが典型。
+// 「〜の絶対値」の直前にある () グループを、演算子（+ - * /）で繋がった連鎖ごと引数として
+// 巻き込み（日本語の「〜の絶対値」は直前の式全体に掛かる読みが自然）、前置き形に組み替える。
+// 変数名に関数名を含むもの（例：[速さの絶対値 v]）は直前が ) でないため対象にならない。
+const POSTFIX_MATH_FUNCS = ['絶対値', '切り下げ', '切り上げ', '平方根'];
+
+function fixPostfixMathFunc(line) {
+  let l = line;
+  let replaced = true;
+  while (replaced) {
+    replaced = false;
+    for (const fn of POSTFIX_MATH_FUNCS) {
+      let from = 0;
+      let i;
+      while ((i = l.indexOf(fn, from)) !== -1) {
+        from = i + fn.length;
+        // 正しいドロップダウン形「[絶対値 v] の …」はスキップ
+        if (l.startsWith(' v]', i + fn.length)) continue;
+        // 直前が「の」で、その前が閉じ括弧 ) であること（後置き形の判定）
+        let j = i - 1;
+        while (j >= 0 && l[j] === ' ') j--;
+        if (l[j] !== 'の') continue;
+        j--;
+        while (j >= 0 && l[j] === ' ') j--;
+        if (l[j] !== ')') continue;
+
+        // ) から対応する ( まで戻ってグループを取り、さらに前が「演算子 グループ」の
+        // 並びなら連鎖ごと引数に巻き込む（(A) - (B) の絶対値 → 差全体の絶対値）
+        const matchOpen = (end) => {
+          let depth = 0;
+          for (let k = end; k >= 0; k--) {
+            if (l[k] === ')') depth++;
+            else if (l[k] === '(') {
+              depth--;
+              if (depth === 0) return k;
+            }
+          }
+          return -1;
+        };
+        let start = matchOpen(j);
+        if (start === -1) continue;
+        let hasChain = false;
+        for (;;) {
+          let p = start - 1;
+          while (p >= 0 && l[p] === ' ') p--;
+          if (p < 0 || !'+-*/'.includes(l[p])) break;
+          p--;
+          while (p >= 0 && l[p] === ' ') p--;
+          if (p < 0 || l[p] !== ')') break;
+          const open = matchOpen(p);
+          if (open === -1) break;
+          start = open;
+          hasChain = true;
+        }
+        const arg = l.slice(start, j + 1);
+        const wrapped = hasChain ? `(${arg})` : arg;
+        l = l.slice(0, start) + `[${fn} v] の ${wrapped}` + l.slice(i + fn.length);
+        replaced = true;
+        break;
+      }
+      if (replaced) break;
+    }
+  }
+  return l;
+}
+
+// 「他スプライトの値」レポーター（sensing_of）の自由記法を公式形に直す。
+// 正しい ja 表記は「((ボール v) の [x座標 v])」。このブロックはAIが
+// 「(ボールのx座標)」「(ボール v の x座標)」のように1つの丸括弧へ自由に書きがちで、
+// 存在しない変数レポーター扱いになる（赤にはならないが、子どもが組めるブロックにならない）。
+// プロパティ名が公式メニュー値（x座標／y座標／向き／大きさ／音量／コスチューム名／背景の名前）に
+// 一致するものだけを対象にする。「(マウスのx座標)」は別の公式ブロックなので除外。
+// 「(ボールのx座標)」形は、同名の実在変数（[ボールのx座標 v] が同コード内に出現）なら変換しない。
+const SENSING_OF_PROPS = '(?:x座標|y座標|向き|大きさ|音量|コスチューム名|背景の名前)';
+
+function fixSensingOfFreeform(code) {
+  // (ボール v の x座標) / (ボール v のx座標) → ((ボール v) の [x座標 v])
+  let out = code.replace(
+    new RegExp(`\\(([^()[\\]]+?)\\s+v\\s*の\\s*(${SENSING_OF_PROPS})\\s*\\)`, 'g'),
+    '(($1 v) の [$2 v])',
+  );
+  // (ボールのx座標) → ((ボール v) の [x座標 v])
+  out = out.replace(
+    new RegExp(`\\(([^()[\\]]+?)の(${SENSING_OF_PROPS})\\)`, 'g'),
+    (m, name, prop) => {
+      const n = name.trim();
+      if (!n || n === 'マウス') return m;                 // (マウスのx座標) は別ブロック
+      if (out.includes(`[${n}の${prop} v]`)) return m;    // 実在変数はそのまま
+      return `((${n} v) の [${prop} v])`;
+    },
+  );
+  return out;
+}
+
+// 比較（< = >）の左右で演算レポーターの外側 () が抜けた形を補正する。
+// 「もし <([絶対値 v] の (差x)) * (15) > ([絶対値 v] の (差y)) * (24)> なら」のように
+// 比較の項が「グループ 演算子 グループ」の裸の連鎖だと、行全体が1つの未知ブロックと
+// 解釈されて赤ブロックになる。トップレベルの <...> の中身を比較演算子で分割し、
+// 演算子連鎖になっている側を () で包む。
+function wrapArithChain(side) {
+  const s = side.trim();
+  if (!s) return side;
+  if (isAlreadyWrapped(s)) return s;
+  for (const op of [' + ', ' - ', ' * ', ' / ']) {
+    if (splitTopLevel(s, op).length > 1) return `(${s})`;
+  }
+  if (isCompoundReporter(s)) return `(${s})`; // 裸の複合レポーター（[絶対値 v] の (x) 等）
+  return s;
+}
+
+function fixArithChainInComparison(line) {
+  if (!/[<=>]/.test(line)) return line;
+  let out = '';
+  let i = 0;
+  while (i < line.length) {
+    if (line[i] === '<' && bracketKind(line, i) === 'open') {
+      let depth = 0;
+      let j = i;
+      for (; j < line.length; j++) {
+        const k = bracketKind(line, j);
+        if (k === 'open') depth++;
+        else if (k === 'close') {
+          depth--;
+          if (depth === 0) break;
+        }
+      }
+      if (j < line.length && depth === 0) {
+        const inner = line.slice(i + 1, j);
+        let fixedInner = inner;
+        for (const op of [' = ', ' > ', ' < ']) {
+          const parts = splitTopLevel(inner, op);
+          if (parts.length === 2) {
+            fixedInner = `${wrapArithChain(parts[0])}${op}${wrapArithChain(parts[1])}`;
+            break;
+          }
+        }
+        out += `<${fixedInner}>`;
+        i = j + 1;
+        continue;
+      }
+    }
+    out += line[i];
+    i++;
+  }
+  return out;
+}
+
 // 既知の誤ったブロック名 → 正しい記法への直接置換
 const KNOWN_WRONG_BLOCKS = [
   // stopブロックの「他のスクリプト」系は行ごとに fixStopOtherScripts で正規化するため
@@ -423,6 +582,10 @@ export function correctScratchBlocks(code) {
     corrected = corrected.replace(wrong, right);
   }
 
+  // Step 1.5: 「他スプライトの値」の自由記法をコード全体で正規化
+  // （実在変数の判定にコード全体が要るため、行ループの前に行う）
+  corrected = fixSensingOfFreeform(corrected);
+
   // Step 2: 行ごとの補正（メッセージ記法・変数ブロックのレポーター囲み忘れ）
   const lines = corrected.split('\n');
   const fixedLines = lines.map(line => {
@@ -434,8 +597,10 @@ export function correctScratchBlocks(code) {
     l = fixVariableDropdownInOperator(l);
     l = fixPointInDirection(l);
     l = fixTurnBlock(l);
+    l = fixPostfixMathFunc(l);
     l = fixNegatedCondition(l);
     l = fixChainedBoolean(l);
+    l = fixArithChainInComparison(l);
     l = fixReporterInVariableBlock(l);
     return l;
   });
