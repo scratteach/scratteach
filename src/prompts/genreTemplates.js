@@ -15,6 +15,11 @@
 //
 // idioms 内のブロック表記は scratchblocks の ja 正規表記に合わせること
 // （例：「(○○ v) キーが押された」「(○○ v) に触れた」「(速度) 歩動かす」）。
+//
+// ゴールデンサンプル（goldenSamples.js）があるジャンルは、生成側では idioms の代わりに
+// 完全見本が注入される。idioms はQA側の引用照合と、見本が無いジャンルの生成で使われ続ける。
+
+import { buildGoldenSampleSection } from './goldenSamples.js';
 
 export const GENRE_TEMPLATES = [
   {
@@ -328,8 +333,11 @@ const ITEM_DROP_PRINCIPLES = [
 
 // 【生成側に注入】そのジャンルの核を「質問せず必ず実装」させる指示文。
 // mechanics（必ず埋める成立条件）＋ idioms（正解形の手本）を渡す。pitfallsはQA側で使う。
+// ゴールデンサンプル（実機検証済みの完全見本）があるジャンルは、断片イディオムの代わりに
+// 完全見本を土台として注入する（ゼロから合成させない＝初回の正確さとドリフト防止）。
 export function buildGenreGenerationAddendum(tpl) {
   if (!tpl) return '';
+  const golden = buildGoldenSampleSection(tpl.id);
   const mech = tpl.mechanics.map((m, i) => `${i + 1}. ${m}`).join('\n');
   const parts = [
     `## 【ジャンル別・必須メカニクス】検出ジャンル：${tpl.label}`,
@@ -341,12 +349,18 @@ export function buildGenreGenerationAddendum(tpl) {
     '',
     '### 必ず実装する必須メカニクス',
     mech,
-    '',
-    '### 実装の手本（このイディオムに倣う。Scratch公式ブロックのみ使用）',
-    '```',
-    tpl.idioms,
-    '```',
   ];
+  if (golden) {
+    parts.push('', golden);
+  } else {
+    parts.push(
+      '',
+      '### 実装の手本（このイディオムに倣う。Scratch公式ブロックのみ使用）',
+      '```',
+      tpl.idioms,
+      '```',
+    );
+  }
   parts.push('', STARTUP_PRINCIPLES);
   if (tpl.collision) {
     parts.push('', COLLISION_PRINCIPLES);
