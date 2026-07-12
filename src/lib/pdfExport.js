@@ -88,6 +88,9 @@ const captureElementAtWidth = async (element, cssWidth) => {
   if (!element) return { canvas: null, cssW: 0, cssH: 0 };
 
   const clone = element.cloneNode(true);
+  // 画面専用UI（インラインのブロックパネル・操作ボタン等）はPDFから除外する。
+  // .pdf-exclude は明示マーカー、.no-print は印刷用の既存マーカー。
+  clone.querySelectorAll('.pdf-exclude, .no-print').forEach((el) => el.remove());
   Object.assign(clone.style, {
     overflow: 'visible',
     maxHeight: 'none',

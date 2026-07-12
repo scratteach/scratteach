@@ -122,16 +122,20 @@ const AIBubble = ({ message, isLatest, isLastGenerating, onApprove, onModify, ga
                   <span>ブロックを右パネルに表示しています</span>
                 </div>
               ) : (
-                <BlockDisplay
-                  sprites={mergedSprites}
-                  spec={mergedSpec}
-                  gameTitle={gameTitle}
-                  onModifySpec={onModify}
-                  onInvalidBlocks={onInvalidBlocks}
-                  onRebuild={onRebuild}
-                  onExportAll={onExportAll}
-                  isRebuilding={isRebuilding}
-                />
+                // pdf-exclude: 会話ログPDFにはインラインのブロックパネル・各種ボタンを
+                // 含めない（ブロックはスプライト別ページに別途出力される）。画面表示には影響しない。
+                <div className="pdf-exclude">
+                  <BlockDisplay
+                    sprites={mergedSprites}
+                    spec={mergedSpec}
+                    gameTitle={gameTitle}
+                    onModifySpec={onModify}
+                    onInvalidBlocks={onInvalidBlocks}
+                    onRebuild={onRebuild}
+                    onExportAll={onExportAll}
+                    isRebuilding={isRebuilding}
+                  />
+                </div>
               )
             )}
           </>
