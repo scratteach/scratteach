@@ -154,6 +154,14 @@ function isReflect(l) {
 function isRemove(l) {
   return /このクローンを削除する/.test(l) || l === '隠す';
 }
+// 変数の増減（得点・ライフ等）。座標の「x座標を…ずつ変える」は除外する。
+function isChangeVar(l) {
+  return /^\[.+ v\] を .* ずつ変える$/.test(l.trim());
+}
+// 「（メッセージ）を送って待つ」＝相手の反応完了を待つ協調の合図
+function isSendAndWait(l) {
+  return /送って待つ$/.test(l.trim());
+}
 // 「もし <(NAME v) に触れた> なら」か（記法ゆれを許容）
 function makeTouchIf(name) {
   const re = new RegExp(`^もし\\s*<\\(\\s*${escapeRegExp(name)}\\s*v\\)\\s*に触れた>\\s*なら$`);
@@ -168,6 +176,20 @@ function touchIfContains(tree, name, pred) {
     if (isTouch(node.line) && subtreeHas(node, pred)) found = true;
   });
   return found;
+}
+
+// sprite の木の「NAMEに触れた」もし節すべてを見て、その本体が持つ反応の種類を集約する。
+// removes=自己削除／消える、changes=変数増減（得点・ライフ等）、sendWait=送って待つ（協調）。
+function touchFlags(tree, name) {
+  const isTouch = makeTouchIf(name);
+  const flags = { removes: false, changes: false, sendWait: false };
+  walk(tree.roots, (node) => {
+    if (!isTouch(node.line)) return;
+    if (subtreeHas(node, isRemove)) flags.removes = true;
+    if (subtreeHas(node, isChangeVar)) flags.changes = true;
+    if (subtreeHas(node, isSendAndWait)) flags.sendWait = true;
+  });
+  return flags;
 }
 
 // sprites: [{name, blocks}] を受け取り、競合形の指摘を配列で返す。
@@ -190,6 +212,36 @@ export function detectCollisionRace(sprites) {
             `同じ接触を両者が別々に判定しているため、消滅が先に走ると反射が発火せず貫通します（実行順依存の競合）。` +
             `反射を「${B.name}が消える前にメッセージを送る → ${A.name}が『（メッセージ）を受け取ったとき』で向きを変える」へ分離するか、` +
             `消滅側で「（メッセージ）を送って待つ」で反射の完了を待ってから「このクローンを削除する」へ並べ替えてください。`
+        );
+      }
+    }
+  }
+
+  // 検出2b：相互「触れた→自己削除／得点・ダメージ」の競合（シューティング型）。
+  // A が「Bに触れた→自分を消す」、B が「Aに触れた→自分を消す or 変数を増減」を
+  // それぞれ独立に判定していると、1フレーム内でどちらが先に走るかで結果が変わる
+  // （＝弾が敵に当たっても撃破できない／敵が自機に当たってもライフが減らない）。
+  // どちらかの節が「送って待つ」で協調していれば正しい一元化なので除外する。
+  const seenPair = new Set();
+  for (const A of trees) {
+    for (const B of trees) {
+      if (A.name === B.name) continue;
+      const key = [A.name, B.name].sort().join(' ');
+      if (seenPair.has(key)) continue;
+      const aOnB = touchFlags(A.tree, B.name);
+      const bOnA = touchFlags(B.tree, A.name);
+      const raceA = aOnB.removes && (bOnA.removes || bOnA.changes);
+      const raceB = bOnA.removes && (aOnB.removes || aOnB.changes);
+      if ((raceA || raceB) && !aOnB.sendWait && !bOnA.sendWait) {
+        seenPair.add(key);
+        issues.push(
+          `「${A.name}」と「${B.name}」が同じ接触をそれぞれの「相手に触れた」判定で処理し、` +
+            `少なくとも片方が接触時に自分を消しています（もう片方は消滅／得点・ダメージ）。` +
+            `1フレーム内でどちらが先に走るかで結果が変わり、消滅が先に走ると相手の判定が空振りします` +
+            `（弾が敵を撃破できない／敵が自機に当たってもライフが減らない等）。` +
+            `判定を片側のスプライトに一元化してください：一方が接触時に「（メッセージ）を送って待つ」で相手の処理を待ってから自分を消す` +
+            `（得点・ダメージや相手の消滅は受け取り側で行う）か、共有変数（ライフ等）の増減と自己削除を同じ1つのスプライトだけで行い、` +
+            `相手側には「触れた→…」を置かないようにします。`
         );
       }
     }
