@@ -78,6 +78,56 @@ export const captureElement = async (element) => {
   }
 };
 
+// 会話ログなど既存DOMを「画面幅に依存しない固定幅」でキャンバス化する。
+// 画面のDOMをそのまま測ると、PC(横広レイアウト)とiPhone(縦長・狭い1カラム)で
+// テキストの折り返し幅が変わり、PDFの縦横比・改ページ挙動が食い違う
+// （長い会話ではA4分割の保険が働き、メッセージ途中で切れる）。
+// オフスクリーンの固定幅コンテナへ複製して描くことで、どの端末でも同じ結果にする。
+// 戻り値: { canvas, cssW, cssH }（cssWは実際に描かれた幅＝ブロックSVGが広ければ固定幅を超える）
+const captureElementAtWidth = async (element, cssWidth) => {
+  if (!element) return { canvas: null, cssW: 0, cssH: 0 };
+
+  const clone = element.cloneNode(true);
+  Object.assign(clone.style, {
+    overflow: 'visible',
+    maxHeight: 'none',
+    height: 'auto',
+    width: '100%',
+    margin: '0',
+  });
+
+  const wrapper = document.createElement('div');
+  Object.assign(wrapper.style, {
+    position: 'fixed',
+    left: '-99999px',
+    top: '0',
+    width: `${cssWidth}px`,
+    boxSizing: 'border-box',
+    background: '#ffffff',
+    margin: '0',
+    padding: '0',
+    overflow: 'visible',
+  });
+  wrapper.appendChild(clone);
+  document.body.appendChild(wrapper);
+  try {
+    const cssW = Math.max(cssWidth, wrapper.scrollWidth);
+    const cssH = wrapper.scrollHeight;
+    const canvas = await html2canvas(wrapper, {
+      scale: RASTER,
+      backgroundColor: '#ffffff',
+      logging: false,
+      width: cssW,
+      height: cssH,
+      windowWidth: cssW,
+      windowHeight: cssH,
+    });
+    return { canvas, cssW, cssH };
+  } finally {
+    document.body.removeChild(wrapper);
+  }
+};
+
 // 日本語を含むHTMLを画面外でレンダリングしてキャンバス化する。
 const htmlToCanvas = async (html, cssWidth) => {
   const container = document.createElement('div');
@@ -265,13 +315,14 @@ const buildConversationSection = async (chatEl, gameTitle, spec) => {
   let chatDrawW = 0;
   let chatDrawH = 0;
   if (chatEl) {
-    const cssW = chatEl.scrollWidth;
-    const cssH = chatEl.scrollHeight;
-    chatCanvas = await captureElement(chatEl);
-    if (chatCanvas) {
+    // 画面幅ではなくA4本文幅相当の固定幅で描き直す（PC/iPhoneで同じ縦横比＝同じ長尺ページに）。
+    // 本文幅いっぱいに描くことで、狭い幅で無用に縦長になり分割保険が働くのも防ぐ。
+    const { canvas, cssW, cssH } = await captureElementAtWidth(chatEl, CONTENT_W_PX);
+    chatCanvas = canvas;
+    if (chatCanvas && cssW > 0) {
       const naturalW = cssW * MM_PER_PX;
       chatDrawW = Math.min(naturalW, CONTENT_W); // 拡大はしない（文字の巨大化防止）
-      chatDrawH = cssW > 0 ? chatDrawW * (cssH / cssW) : 0;
+      chatDrawH = chatDrawW * (cssH / cssW);
     }
   }
 
