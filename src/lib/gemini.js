@@ -38,6 +38,18 @@ const extractUsedNames = (sprites) => {
   return { vars, msgs, cloneLocal };
 };
 
+// プレイヤーに見せる定番変数（スコア・時間・ライフ等）はチェックONで「表示」にする。
+// 内部処理用（番号・間隔・フラグ等）は既定で「非表示」。「出ている時間」を表示に
+// しないよう、あいまいな「時間」単独ではなく具体語（残り時間 等）で判定する。
+const DISPLAY_VAR_KEYWORDS = [
+  'スコア', '得点', '点数', 'ポイント', 'ライフ', '残機', 'レベル',
+  'ハイスコア', 'コンボ', '残り時間', 'のこり時間', 'タイム', 'タイマー', '記録',
+];
+const varDisplayLabel = (name) =>
+  DISPLAY_VAR_KEYWORDS.some(k => name.includes(k))
+    ? 'ゲーム画面に表示：☑（表示）'
+    : 'ゲーム画面に表示：□（非表示）';
+
 // 事前準備リスト（message内の■変数／■メッセージ）の漏れを決定論で補完する。
 // AIは生成の途中で導入した作業用変数（差x・差y等）を、先に書いた準備リストへ
 // 載せ忘れることがある。ブロックから抽出した名前が message に見当たらなければ、
@@ -65,12 +77,12 @@ export const completePreparationList = (parsed) => {
   const lines = ['', '⚠️ 自動チェック：ブロックで使っているのに準備リストに無い名前を見つけました。こちらも作ってください。'];
   if (globalVars.length) {
     lines.push('■ 追加の変数（コードタブ→変数→変数を作る／全体用）');
-    for (const v of globalVars) lines.push(`・${v}　→ ゲーム画面に表示：□（非表示）`);
+    for (const v of globalVars) lines.push(`・${v}　→ ${varDisplayLabel(v)}`);
   }
   for (const [sp, vs] of localBySprite) {
     lines.push(`■ 追加の変数（「${sp}」スプライトを選んでから作る／「このスプライトのみ」★ここ重要）`);
     lines.push('　※クローンを使う変数です。「全体用」にすると全部のクローンで同じ値になりゲームが動きません。');
-    for (const v of vs) lines.push(`・${v}　→ ゲーム画面に表示：□（非表示）`);
+    for (const v of vs) lines.push(`・${v}　→ ${varDisplayLabel(v)}`);
   }
   if (missingMsgs.length) {
     lines.push('■ 追加のメッセージ');
