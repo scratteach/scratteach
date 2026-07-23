@@ -21,6 +21,11 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+        // 新しいService Workerを待たせず即有効化し、古いキャッシュを掃除する。
+        // これでデプロイ後の再読み込みで最新版が確実に反映される。
+        clientsClaim: true,
+        skipWaiting: true,
+        cleanupOutdatedCaches: true,
       },
     })
   ],
