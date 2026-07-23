@@ -330,6 +330,24 @@ function fixMissingSetVerb(line) {
   return `${m[1]} を ${value} にする`;
 }
 
+// 数値スロットを取る末尾キーワードで、引数の () が落ちた「裸のトークン/演算」を () で包む。
+// AIは「(ポップ間隔) 秒待つ」の変数の括弧を落として「ポップ間隔 秒待つ」と書きがちで、
+// これは control_wait 等に一致せず赤ブロックになる（数値スロットに裸のトークンが入るため）。
+// 引数が既に () で包まれていれば触らない。演算の外側()落ち（例:「(1) から (3) までの乱数 秒待つ」）も救う。
+const BARE_NUM_ARG_SUFFIXES = [' 秒待つ', ' 回繰り返す'];
+function fixBareNumArg(line) {
+  for (const suf of BARE_NUM_ARG_SUFFIXES) {
+    if (line.endsWith(suf)) {
+      const arg = line.slice(0, -suf.length).trim();
+      if (!arg) return line;
+      if (isAlreadyWrapped(arg)) return line;   // 既に () で包まれている
+      if (arg.startsWith('[') && arg.endsWith(']')) return line; // 文字列/ドロップダウンは対象外
+      return `(${arg})${suf}`;
+    }
+  }
+  return line;
+}
+
 // [変数 v] を VALUE にする  /  [変数 v] を VALUE ずつ変える
 // の VALUE が複合レポーターなら外側に () を追加
 function fixReporterInVariableBlock(line) {
@@ -685,6 +703,7 @@ export function correctScratchBlocks(code) {
     l = fixChainedBoolean(l);
     l = fixArithChainInComparison(l);
     l = fixMissingSetVerb(l);
+    l = fixBareNumArg(l);
     l = fixReporterInVariableBlock(l);
     return l;
   });
