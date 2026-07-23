@@ -47,7 +47,7 @@ const DISPLAY_VAR_KEYWORDS = [
 ];
 const varDisplayLabel = (name) =>
   DISPLAY_VAR_KEYWORDS.some(k => name.includes(k))
-    ? 'ゲーム画面に表示：☑（表示）'
+    ? 'ゲーム画面に表示：✅（表示）'
     : 'ゲーム画面に表示：□（非表示）';
 
 // 事前準備リスト（message内の■変数／■メッセージ）の漏れを決定論で補完する。

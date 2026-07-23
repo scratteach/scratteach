@@ -1003,7 +1003,7 @@ export function buildGoldenSampleSection(genreId) {
     .map(s => `▶ スプライト「${s.name}」\n\`\`\`\n${s.blocks}\n\`\`\``)
     .join('\n\n');
   const varsText = gs.variables
-    .map(v => `・${v.name}：${v.purpose}　→ 表示：${v.display ? '☑' : '□（非表示）'}`)
+    .map(v => `・${v.name}：${v.purpose}　→ 表示：${v.display ? '✅' : '□（非表示）'}`)
     .join('\n');
   return [
     `## 【完全見本（実機検証済みゴールデンサンプル）】${gs.label}`,
