@@ -8,23 +8,34 @@ export const getSystemPrompt = (blockLang) =>
 // 変数はセット系ブロック（を〜にする／ずつ変える／表示・隠す）の左辺だけを拾う
 // （読み取りの (変数) は組み込みレポーターと区別できないため対象にしない。
 //   生成コードで使う変数はほぼ必ずどこかでセットされるので実用上これで拾える）。
+// あわせて「クローンされたとき」の中でセットされる変数は各クローン固有＝必ず
+// 「このスプライトのみ」にすべき（全体用にすると全クローンで共有されゲームが壊れる）
+// ため、その変数名→スプライト名を cloneLocal に記録して準備リストを振り分ける。
 const extractUsedNames = (sprites) => {
   const vars = new Set();
   const msgs = new Set();
+  const cloneLocal = new Map(); // 変数名 -> スプライト名（このスプライトのみで作るべき）
   for (const s of sprites || []) {
     const code = correctScratchBlocks(s.blocks || '');
+    let inClone = false;
     for (const raw of code.split('\n')) {
       const line = raw.trim();
+      if (line === '') { inClone = false; continue; }
+      // ハット（「〜とき」で始まるスクリプトの起点）でクローン文脈か判定し直す
+      if (line.endsWith('とき')) {
+        inClone = line === 'クローンされたとき';
+        const hm = line.match(/^\((.+?) v\) を受け取ったとき$/);
+        if (hm) msgs.add(hm[1]);
+        continue;
+      }
       let m = line.match(/^\[(.+?) v\] を .+(にする|ずつ変える)$/);
-      if (m) vars.add(m[1]);
+      if (m) { vars.add(m[1]); if (inClone && !cloneLocal.has(m[1])) cloneLocal.set(m[1], s.name); }
       m = line.match(/^変数 \[(.+?) v\] を(表示する|隠す)$/);
       if (m) vars.add(m[1]);
       for (const mm of line.matchAll(/\((.+?) v\) を送(?:る|って待つ)/g)) msgs.add(mm[1]);
-      m = line.match(/^\((.+?) v\) を受け取ったとき$/);
-      if (m) msgs.add(m[1]);
     }
   }
-  return { vars, msgs };
+  return { vars, msgs, cloneLocal };
 };
 
 // 事前準備リスト（message内の■変数／■メッセージ）の漏れを決定論で補完する。
@@ -35,15 +46,31 @@ export const completePreparationList = (parsed) => {
   if (!parsed || parsed.phase !== 'generating') return parsed;
   if (!Array.isArray(parsed.sprites) || parsed.sprites.length === 0) return parsed;
   const message = parsed.message || '';
-  const { vars, msgs } = extractUsedNames(parsed.sprites);
+  const { vars, msgs, cloneLocal } = extractUsedNames(parsed.sprites);
   const missingVars = [...vars].filter(v => !message.includes(v));
   const missingMsgs = [...msgs].filter(v => !message.includes(v));
   if (missingVars.length === 0 && missingMsgs.length === 0) return parsed;
 
+  // クローン固有の変数は「このスプライトのみ」で作らないと全クローンで共有され壊れる。
+  // 全体用とこのスプライトのみ（スプライト別）に振り分けて案内する。
+  const globalVars = missingVars.filter(v => !cloneLocal.has(v));
+  const localVars = missingVars.filter(v => cloneLocal.has(v));
+  const localBySprite = new Map();
+  for (const v of localVars) {
+    const sp = cloneLocal.get(v);
+    if (!localBySprite.has(sp)) localBySprite.set(sp, []);
+    localBySprite.get(sp).push(v);
+  }
+
   const lines = ['', '⚠️ 自動チェック：ブロックで使っているのに準備リストに無い名前を見つけました。こちらも作ってください。'];
-  if (missingVars.length) {
+  if (globalVars.length) {
     lines.push('■ 追加の変数（コードタブ→変数→変数を作る／全体用）');
-    for (const v of missingVars) lines.push(`・${v}　→ ゲーム画面に表示：□（非表示）`);
+    for (const v of globalVars) lines.push(`・${v}　→ ゲーム画面に表示：□（非表示）`);
+  }
+  for (const [sp, vs] of localBySprite) {
+    lines.push(`■ 追加の変数（「${sp}」スプライトを選んでから作る／「このスプライトのみ」★ここ重要）`);
+    lines.push('　※クローンを使う変数です。「全体用」にすると全部のクローンで同じ値になりゲームが動きません。');
+    for (const v of vs) lines.push(`・${v}　→ ゲーム画面に表示：□（非表示）`);
   }
   if (missingMsgs.length) {
     lines.push('■ 追加のメッセージ');
