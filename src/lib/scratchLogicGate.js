@@ -248,3 +248,37 @@ export function detectCollisionRace(sprites) {
   }
   return issues;
 }
+
+// ── 検出3：デッドストア（直前の代入を読まずに上書きする）───────────
+// 「[X] を A にする」の直後に「[X] を B にする」が続く形は、1行目が必ず無意味になる。
+// これは生成AIが「本来は別々の2つの変数」を1つの名前に潰してしまったときに出る形。
+// 実例：クローンの「自分はクローンか(true/false)」と「自分の番号(1〜6)」が両方スプライト名に
+// 化け、フラグが数値で上書きされて判定が永久に成立しなくなった（赤ブロックにもならず
+// LLMのQAも通るのに、ゲームがまったく起動しない）。
+// 隣接する2行だけを見るので誤検出しない（2行の間では何も起こり得ないため、
+// 1行目の値を誰かが読む余地がない）。
+// 「ずつ変える」は変数を読むので、上書き側（2行目）が「にする」のときだけ対象にする。
+const SET_LINE_RE = /^\[(.+?) v\] を (.+) にする$/;
+const CHANGE_LINE_RE = /^\[(.+?) v\] を (.+) ずつ変える$/;
+
+export function detectDeadStore(sprites) {
+  const issues = [];
+  for (const s of sprites || []) {
+    if (!s || !s.blocks) continue;
+    const lines = String(s.blocks).split('\n').map((l) => l.trim());
+    for (let i = 0; i + 1 < lines.length; i++) {
+      const prev = lines[i].match(SET_LINE_RE) || lines[i].match(CHANGE_LINE_RE);
+      const next = lines[i + 1].match(SET_LINE_RE);
+      if (!prev || !next || prev[1] !== next[1]) continue;
+      // 上書き側が自分自身を読んでいる（[X] を ((X)+(1)) にする 等）なら死んでいない
+      if (next[2].includes(`(${next[1]})`)) continue;
+      issues.push(
+        `「${s.name}」で変数「${next[1]}」に2行続けて代入しています（「${lines[i]}」→「${lines[i + 1]}」）。` +
+          `1行目の値は一度も読まれないまま上書きされるので、必ず無意味になります。` +
+          `本来は別々の2つの変数（例：状態フラグと番号）を1つの名前にまとめてしまっている可能性が高いです。` +
+          `用途ごとに違う名前の変数へ分け、それぞれの行で正しい変数にセットしてください。`
+      );
+    }
+  }
+  return issues;
+}

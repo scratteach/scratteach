@@ -8,7 +8,7 @@ import { detectGenre, buildGenreGenerationAddendum, buildGenreQARubric } from '.
 import { useCreateSession } from '../../hooks/useCreateSession.js';
 import { exportSessionToPDF } from '../../lib/pdfExport.js';
 import { correctScratchBlocks } from '../../lib/scratchBlocksCorrector.js';
-import { detectCollisionRace } from '../../lib/scratchLogicGate.js';
+import { detectCollisionRace, detectDeadStore } from '../../lib/scratchLogicGate.js';
 
 const formatText = (text) => {
   if (!text) return null;
@@ -522,8 +522,10 @@ const CreateModeChat = ({ onOpenSettings }) => {
   }, [callAPI, applyRebuildResult, applyCorrectorLocally, isAutoFixing, isLoading]);
 
   // 動作QAゲート：generating結果が出たあとに2段で採点する。
-  //   ① 決定論ロジックゲート（detectCollisionRace）＝ジャンル非依存・APIキー不要・fail-openなし。
-  //      当たり判定の競合（消滅が先に走って反射が出ず貫通する形）を構造から確実に検出する。
+  //   ① 決定論ロジックゲート（detectCollisionRace / detectDeadStore）＝ジャンル非依存・
+  //      APIキー不要・fail-openなし。構造から確実に検出する2種：
+  //        - 当たり判定の競合（消滅が先に走って反射が出ず貫通する形）
+  //        - デッドストア（直前の代入を読まずに上書き＝2つの変数を1つの名前に潰した形）
   //   ② LLM意味ゲート（runGameQACheck）＝ジャンル検出時のみ。必須メカニクスの欠落を採点。
   //  どちらかが問題を挙げたら、両者の指摘をまとめて1回だけ作り直す。
   //  ※グリッド初期化のループ内巻き込み（1列バグ）は描画/補正の決定論パスで常時直すためここでは扱わない。
@@ -545,6 +547,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
 
     // ① 決定論ロジックゲート（常時）
     const raceIssues = detectCollisionRace(merged);
+    const deadStoreIssues = detectDeadStore(merged);
 
     // ② LLM意味ゲート（ジャンル検出＋APIキーがあるときだけ）
     const genreText = [...messagesRef.current.map(m => m.content || ''), newGenMessage?.content || ''].join('\n');
@@ -561,7 +564,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
       }
     }
 
-    const problems = [...raceIssues, ...llmProblems];
+    const problems = [...raceIssues, ...deadStoreIssues, ...llmProblems];
     if (!problems.length) return; // 合格ならそのまま表示
 
     // 指摘をまとめて1回だけ作り直し
