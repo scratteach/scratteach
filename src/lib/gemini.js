@@ -50,6 +50,26 @@ const varDisplayLabel = (name) =>
     ? 'ゲーム画面に表示：✅（表示）'
     : 'ゲーム画面に表示：□（非表示）';
 
+// 「大きさを○%にする」の数値は見本の絵に紐づいた値でしかない。利用者が自分で
+// 用意した画像は元のピクセル数が違うので、同じ%では大きすぎたり小さすぎたりする。
+// AIはこの案内を準備リストに書き忘れるため、サイズ指定があるときは必ず添える。
+const SIZE_BLOCK_RE = /大きさを\s*\(\s*-?[\d.]+\s*\)\s*%にする/;
+const SIZE_NOTE_MARKER = '用意した画像に合わせて';
+
+const buildCostumeSizeNote = (sprites, message) => {
+  if (message.includes(SIZE_NOTE_MARKER)) return null;   // AIが自分で書いていれば重ねない
+  const sized = sprites.filter(s => SIZE_BLOCK_RE.test(s?.blocks || '')).map(s => s.name);
+  if (sized.length === 0) return null;
+  return [
+    `■ コスチュームの大きさ（${SIZE_NOTE_MARKER}調整してください）`,
+    `・「大きさを○%にする」が入っているスプライト：${sized.join('・')}`,
+    '　※この%は見本の絵に合わせた数値です。自分で用意した画像は元の大きさが違うので、',
+    '　　同じ%だと大きすぎたり小さすぎたりします。ステージ（480×360）で見ながら数値を変えてください。',
+    '　※取り込んだ画像は「ビットマップ解像度2」になることが多く、その場合は元のピクセル数の',
+    '　　半分がステージ上の実寸です（例：756pxの絵を20%にすると 756÷2×0.20＝約76px）。',
+  ].join('\n');
+};
+
 // 事前準備リスト（message内の■変数／■メッセージ）の漏れを決定論で補完する。
 // AIは生成の途中で導入した作業用変数（差x・差y等）を、先に書いた準備リストへ
 // 載せ忘れることがある。ブロックから抽出した名前が message に見当たらなければ、
@@ -61,7 +81,8 @@ export const completePreparationList = (parsed) => {
   const { vars, msgs, cloneLocal } = extractUsedNames(parsed.sprites);
   const missingVars = [...vars].filter(v => !message.includes(v));
   const missingMsgs = [...msgs].filter(v => !message.includes(v));
-  if (missingVars.length === 0 && missingMsgs.length === 0) return parsed;
+  const sizeNote = buildCostumeSizeNote(parsed.sprites, message);
+  if (missingVars.length === 0 && missingMsgs.length === 0 && !sizeNote) return parsed;
 
   // クローン固有の変数は「このスプライトのみ」で作らないと全クローンで共有され壊れる。
   // 全体用とこのスプライトのみ（スプライト別）に振り分けて案内する。
@@ -74,7 +95,10 @@ export const completePreparationList = (parsed) => {
     localBySprite.get(sp).push(v);
   }
 
-  const lines = ['', '⚠️ 自動チェック：ブロックで使っているのに準備リストに無い名前を見つけました。こちらも作ってください。'];
+  const lines = [];
+  if (missingVars.length || missingMsgs.length) {
+    lines.push('', '⚠️ 自動チェック：ブロックで使っているのに準備リストに無い名前を見つけました。こちらも作ってください。');
+  }
   if (globalVars.length) {
     lines.push('■ 追加の変数（コードタブ→変数→変数を作る／全体用）');
     for (const v of globalVars) lines.push(`・${v}　→ ${varDisplayLabel(v)}`);
@@ -88,6 +112,7 @@ export const completePreparationList = (parsed) => {
     lines.push('■ 追加のメッセージ');
     for (const v of missingMsgs) lines.push(`・${v}`);
   }
+  if (sizeNote) lines.push('', sizeNote);
   const section = lines.join('\n');
 
   const marker = message.lastIndexOf('準備ができたら');
