@@ -61,6 +61,28 @@ function toMessageDropdown(token) {
   return `(${name} v)`;
 }
 
+// 全角スペース等の非ASCII空白を半角へ正規化する（ブラケットの外側だけ）。
+// AIが日本語の出力の癖で「(落とす間隔)　秒待つ」のように全角スペースを混ぜると、
+// scratchblocks のハッシュが '_ 秒待つ' と一致せず obsolete＝赤になる。
+// 見た目では半角と区別できないうえ、trim() が全角空白も落とすため
+// fixBareNumArg 等の既存補正は「既に正しい」と判断して素通りしてしまう。
+// 変数名・文字列・ドロップダウン（()と[]の内側）は利用者が意図して全角を
+// 使っている可能性があるので触らず、構造部分の空白だけを直す。
+const NON_ASCII_SPACE = /[　  -   ]/;
+
+function fixFullWidthSpace(line) {
+  if (!NON_ASCII_SPACE.test(line)) return line;
+  let depth = 0;
+  let out = '';
+  for (const ch of line) {
+    // <> は比較演算子と兼用で深さを正しく追えないため () [] だけを見る。
+    if (ch === '(' || ch === '[') depth++;
+    else if (ch === ')' || ch === ']') depth = Math.max(0, depth - 1);
+    out += depth === 0 && NON_ASCII_SPACE.test(ch) ? ' ' : ch;
+  }
+  return out;
+}
+
 // メッセージブロック（送る／送って待つ／受け取ったとき）のメッセージ名を
 // 丸ドロップダウン (名前 v) に正規化する。プレーンテキスト名（例：「判定開始 を送る」）は
 // 赤ブロックになり、四角 [名前 v] は形が本物（楕円）と食い違うため、どちらも丸 () に直す。
@@ -690,6 +712,7 @@ export function correctScratchBlocks(code) {
   const lines = corrected.split('\n');
   const fixedLines = lines.map(line => {
     let l = line.trim();
+    l = fixFullWidthSpace(l);   // 以降の正規表現が半角前提なので最初に正規化する
     l = fixMessageBlock(l);
     l = fixKeyPressedBlock(l);
     l = fixCloneBlock(l);
