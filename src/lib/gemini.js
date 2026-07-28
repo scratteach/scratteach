@@ -19,7 +19,8 @@ const extractUsedNames = (sprites) => {
   // スプライトに1つずつ要る。スプライト専用変数は他スプライトから見えないため、
   // 1か所にしか案内しないと、残りのスプライトでブロックを組めなくなる。
   const cloneLocal = new Map();
-  const localNames = new Set();  // クローン文脈で使われた＝ローカル必須の名前
+  const cloneSetBy = new Map();  // 変数名 -> Set<「クローンされたとき」の中でセットしたスプライト名>
+  const accumulated = new Set();  // どこかで「ずつ変える」された名前＝共有カウンタ
   const setBy = new Map();       // 変数名 -> Set<セットしているスプライト名>
   for (const s of sprites || []) {
     const code = correctScratchBlocks(s.blocks || '');
@@ -39,14 +40,46 @@ const extractUsedNames = (sprites) => {
         vars.add(m[1]);
         if (!setBy.has(m[1])) setBy.set(m[1], new Set());
         setBy.get(m[1]).add(s.name);
-        if (inClone) localNames.add(m[1]);
+        // 「ずつ変える」は積み上げ＝スコア・ライフ等の共有カウンタの印。
+        // クローンの中から加算される全体変数がここに大量に該当するため、
+        // 「クローンの中でセットされる」だけでローカルと決めつけてはいけない。
+        if (/ずつ変える$/.test(line)) accumulated.add(m[1]);
+        if (inClone) {
+          if (!cloneSetBy.has(m[1])) cloneSetBy.set(m[1], new Set());
+          cloneSetBy.get(m[1]).add(s.name);
+        }
       }
       m = line.match(/^変数 \[(.+?) v\] を(表示する|隠す)$/);
       if (m) vars.add(m[1]);
       for (const mm of line.matchAll(/\((.+?) v\) を送(?:る|って待つ)/g)) msgs.add(mm[1]);
     }
   }
-  for (const name of localNames) cloneLocal.set(name, setBy.get(name) || new Set());
+  // 読み取り側も数える。セットだけ見ると、あるスプライトが計算して別のスプライトが
+  // 読む全体変数（例：ブロックが決めてボールが読む「反射軸」）を専用と誤判定する。
+  // 変数名は上のセット解析で確定しているので、その名前の (名前) / [名前 v] を探せば
+  // 組み込みレポーターと取り違えずに読み取りを拾える。
+  const usedBy = new Map();
+  for (const s2 of sprites || []) {
+    const code = correctScratchBlocks(s2.blocks || '');
+    for (const name of vars) {
+      if (code.includes(`(${name})`) || code.includes(`[${name} v]`)) {
+        if (!usedBy.has(name)) usedBy.set(name, new Set());
+        usedBy.get(name).add(s2.name);
+      }
+    }
+  }
+
+  // 「このスプライトのみ」で作るべき＝次の3つを満たす名前。
+  //  ① クローンの中でセットされる（クローンごとに別の値を持つ）
+  //  ② 一度も「ずつ変える」されない（＝スコア等の共有カウンタではない）
+  //  ③ その名前を使う全スプライトが、自分のクローン処理の中でセットしている
+  //     （1つでも「読むだけ」のスプライトがあれば、それは共有＝全体変数）
+  for (const [name, clonedIn] of cloneSetBy) {
+    if (accumulated.has(name)) continue;
+    const users = usedBy.get(name) || new Set();
+    if ([...users].some((sp) => !clonedIn.has(sp))) continue;
+    cloneLocal.set(name, setBy.get(name) || new Set());
+  }
   return { vars, msgs, cloneLocal };
 };
 
@@ -80,6 +113,35 @@ const buildCostumeSizeNote = (sprites, message) => {
     '　※取り込んだ画像は「ビットマップ解像度2」になることが多く、その場合は元のピクセル数の',
     '　　半分がステージ上の実寸です（例：756pxの絵を20%にすると 756÷2×0.20＝約76px）。',
   ].join('\n');
+};
+
+// 同じ名前の「このスプライトのみ」変数が複数のスプライトに現れたら、スプライト名を
+// 冠して別名に分ける。Scratch的には同名ローカルも合法だが、変数一覧に同じ名前が
+// 並ぶとどれがどれか見分けられず、うっかり「全体用」で1個だけ作ってしまう事故が起きる。
+// （クローン用フラグを全体用にすると全クローンで値が共有され、ゲームが起動しない）
+// 名前を機械的にユニークにすれば、その事故ごと消える。
+// 1スプライトしか使っていない名前はそのまま（不要に長くしない）。
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+export const disambiguateLocalVars = (parsed) => {
+  if (!parsed || !Array.isArray(parsed.sprites) || parsed.sprites.length === 0) return parsed;
+  const { cloneLocal } = extractUsedNames(parsed.sprites);
+  const dup = [...cloneLocal.entries()].filter(([, sps]) => sps.size > 1);
+  if (dup.length === 0) return parsed;
+
+  const sprites = parsed.sprites.map((s) => {
+    let blocks = s.blocks || '';
+    for (const [name, sps] of dup) {
+      if (!sps.has(s.name)) continue;
+      const renamed = `${s.name}の${name}`;
+      const n = escapeRe(name);
+      blocks = blocks
+        .replace(new RegExp(`\\[${n} v\\]`, 'g'), `[${renamed} v]`)
+        .replace(new RegExp(`\\(${n}\\)`, 'g'), `(${renamed})`);
+    }
+    return { ...s, blocks };
+  });
+  return { ...parsed, sprites };
 };
 
 // 事前準備リスト（message内の■変数／■メッセージ）の漏れを決定論で補完する。
@@ -160,7 +222,7 @@ export const completePreparationList = (parsed) => {
 export const parseCreateModeResponse = (text) => {
   try {
     const clean = text.replace(/^```json\s*|\s*```$/g, '').trim();
-    return completePreparationList(JSON.parse(clean));
+    return completePreparationList(disambiguateLocalVars(JSON.parse(clean)));
   } catch {
     return { phase: 'planning', message: text, question: null, spec: {}, sprites: null };
   }
