@@ -124,8 +124,34 @@ function fixBarePercentArg(line) {
 // AIは「(値) の [四捨五入 v]」と書きがちで、これは赤にならず sensing_of（他スプライトの値・青）
 // に化ける。ドロップダウンが変数選択になってしまい、そのままでは組めない。
 // 赤ブロック検査では捕まらない（正しい別ブロックとして成立してしまう）ので、ここで潰す。
+// 正しいのは「(値) を四捨五入」だけ。「の」で繋いだ形は括弧の有無を問わずすべて誤り
+// （OPERATORS_ROUND のテンプレートは "%1 を四捨五入" で、「の」を使う形は存在しない）。
+// 括弧付き → 括弧なし の順に潰す。
+// 括弧は必須にする。省略可にすると「(四捨五入 の (a))」で外側の括弧を食い違わせ、
+// 直すどころか壊れた式を作ってしまう（この形は現実には出ないので対象外でよい）。
+const ROUND_PREFIX_RE = /[[(]\s*四捨五入(?:\s+v)?\s*[\])]\s*の\s*/;
+
 function fixRoundForm(line) {
-  return line.replace(/\s*の\s*[[(]\s*四捨五入(?:\s+v)?\s*[\])]/g, ' を四捨五入');
+  let l = line
+    .replace(/\s*の\s*[[(]\s*四捨五入(?:\s+v)?\s*[\])]/g, ' を四捨五入')
+    .replace(/\s*の\s*四捨五入/g, ' を四捨五入');
+  // 前置き「[四捨五入 v] の (値)」＝絶対値の前置き崩れと同じ形。括弧を数えて
+  // 対応する閉じ括弧まで取り出し、後ろに回す。
+  for (let guard = 0; guard < 5; guard++) {
+    const m = l.match(ROUND_PREFIX_RE);
+    if (!m) break;
+    const start = m.index + m[0].length;
+    if (l[start] !== '(') break;
+    let depth = 0;
+    let end = -1;
+    for (let i = start; i < l.length; i++) {
+      if (l[i] === '(') depth++;
+      else if (l[i] === ')') { depth--; if (depth === 0) { end = i; break; } }
+    }
+    if (end === -1) break;
+    l = `${l.slice(0, m.index)}${l.slice(start, end + 1)} を四捨五入${l.slice(end + 1)}`;
+  }
+  return l;
 }
 
 // メッセージブロック（送る／送って待つ／受け取ったとき）のメッセージ名を
