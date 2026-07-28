@@ -83,6 +83,29 @@ function fixFullWidthSpace(line) {
   return out;
 }
 
+// 全角の「％」と、ハッシュを壊す余分な空白を直す。
+// scratchblocks は「大きさを %1 %にする」のように空白まで含めて一致を見るため、
+// 「(25) ％にする」（全角％）や「(25) % にする」（%の後に空白）は赤になる。
+// 全角％は半角と見た目で区別がつかず、原因に気づけない類の赤。
+// 「(値) を 四捨五入」の余分な空白も同じ理由で赤になるのでここで潰す。
+function fixPercentAndSpacing(line) {
+  return line
+    .replace(/％/g, '%')
+    .replace(/%\s+にする$/, '%にする')
+    .replace(/を\s+四捨五入/g, 'を四捨五入');
+}
+
+// 「大きさを 25 %にする」のように引数の括弧が落ちた形を直す（fixBareNumArg の % 版）。
+// 対象は %にする で終わる2ブロック（大きさ・音量）。文字列/ドロップダウンは触らない。
+function fixBarePercentArg(line) {
+  const m = line.match(/^(大きさを|音量を)\s+(.+?)\s*%にする$/);
+  if (!m) return line;
+  const arg = m[2].trim();
+  if (!arg || isAlreadyWrapped(arg)) return line;
+  if (arg.startsWith('[') && arg.endsWith(']')) return line;
+  return `${m[1]} (${arg}) %にする`;
+}
+
 // 「四捨五入」を数学関数（「_ の _」）の形で書いてしまった誤りを直す。
 // Scratchの「_ の [絶対値 v]」メニューに四捨五入は無く、四捨五入は独立した
 // 「(_) を四捨五入」ブロック。にもかかわらず絶対値・切り上げ等と同じ仲間に見えるため
@@ -732,6 +755,8 @@ export function correctScratchBlocks(code) {
     l = fixTurnBlock(l);
     l = fixOfReporterDropdownShape(l);
     l = fixMathFuncForm(l);
+    l = fixPercentAndSpacing(l);
+    l = fixBarePercentArg(l);
     l = fixRoundForm(l);
     l = fixNegatedCondition(l);
     l = fixChainedBoolean(l);
