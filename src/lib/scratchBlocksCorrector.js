@@ -83,6 +83,16 @@ function fixFullWidthSpace(line) {
   return out;
 }
 
+// 「四捨五入」を数学関数（「_ の _」）の形で書いてしまった誤りを直す。
+// Scratchの「_ の [絶対値 v]」メニューに四捨五入は無く、四捨五入は独立した
+// 「(_) を四捨五入」ブロック。にもかかわらず絶対値・切り上げ等と同じ仲間に見えるため
+// AIは「(値) の [四捨五入 v]」と書きがちで、これは赤にならず sensing_of（他スプライトの値・青）
+// に化ける。ドロップダウンが変数選択になってしまい、そのままでは組めない。
+// 赤ブロック検査では捕まらない（正しい別ブロックとして成立してしまう）ので、ここで潰す。
+function fixRoundForm(line) {
+  return line.replace(/\s*の\s*[[(]\s*四捨五入(?:\s+v)?\s*[\])]/g, ' を四捨五入');
+}
+
 // メッセージブロック（送る／送って待つ／受け取ったとき）のメッセージ名を
 // 丸ドロップダウン (名前 v) に正規化する。プレーンテキスト名（例：「判定開始 を送る」）は
 // 赤ブロックになり、四角 [名前 v] は形が本物（楕円）と食い違うため、どちらも丸 () に直す。
@@ -722,6 +732,7 @@ export function correctScratchBlocks(code) {
     l = fixTurnBlock(l);
     l = fixOfReporterDropdownShape(l);
     l = fixMathFuncForm(l);
+    l = fixRoundForm(l);
     l = fixNegatedCondition(l);
     l = fixChainedBoolean(l);
     l = fixArithChainInComparison(l);
