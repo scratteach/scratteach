@@ -61,24 +61,37 @@ function toMessageDropdown(token) {
   return `(${name} v)`;
 }
 
-// 全角スペース等の非ASCII空白を半角へ正規化する（ブラケットの外側だけ）。
-// AIが日本語の出力の癖で「(落とす間隔)　秒待つ」のように全角スペースを混ぜると、
-// scratchblocks のハッシュが '_ 秒待つ' と一致せず obsolete＝赤になる。
-// 見た目では半角と区別できないうえ、trim() が全角空白も落とすため
-// fixBareNumArg 等の既存補正は「既に正しい」と判断して素通りしてしまう。
-// 変数名・文字列・ドロップダウン（()と[]の内側）は利用者が意図して全角を
-// 使っている可能性があるので触らず、構造部分の空白だけを直す。
-const NON_ASCII_SPACE = /[　  -   ]/;
+// 全角文字を半角へ正規化する（ブラケットの外側だけ）。
+// Geminiは日本語出力の癖で全角スペースや全角％を混ぜる。scratchblocks は空白まで
+// 含めてハッシュ一致を見るため、「(落とす間隔)　秒待つ」「大きさを (25) ％にする」は
+// いずれも obsolete＝赤になる。
+// 厄介なのは**半角と見た目で区別がつかない**こと。人が見ても原因が分からないうえ、
+// AIは自分の出力の全角/半角を認識できないので、再生成させても同じ文字を出し続ける。
+// ＝この種の赤はAIに直させてはいけない。ここで機械的に潰しきるのが唯一の解。
+// 変数名・文字列・ドロップダウン（() と [] の内側）は利用者が意図して全角を使って
+// いる可能性があるので触らず、ブロックの骨格部分だけを直す。
+const NON_ASCII_SPACE = /[　  -   ]/;
 
-function fixFullWidthSpace(line) {
-  if (!NON_ASCII_SPACE.test(line)) return line;
-  let depth = 0;
+// 変換してよいのは「ブロックの骨格を作る記号」だけ。全角数字や全角英字は変換しない
+// ＝コスチューム名「すばこ４」「スクラ_かご１」のような実在の名前を壊さないため。
+const FULLWIDTH_MAP = {
+  '　': ' ', '％': '%', '（': '(', '）': ')', '［': '[', '］': ']',
+  '＜': '<', '＞': '>', '＝': '=', '＋': '+', '－': '-', '−': '-', '＊': '*', '／': '/',
+};
+
+// 名前が入る領域＝[...]（文字列・角ドロップダウン）と (... v)（丸ドロップダウン）。
+// ここは利用者が全角を意図して使っている可能性があるので触らない。
+const PROTECTED_REGION = /\[[^[\]]*\]|\([^()]* v\)/g;
+
+function fixFullWidthChars(line) {
+  const keep = [];
+  for (const m of line.matchAll(PROTECTED_REGION)) keep.push([m.index, m.index + m[0].length]);
+  const inKeep = (i) => keep.some(([s2, e]) => i >= s2 && i < e);
   let out = '';
-  for (const ch of line) {
-    // <> は比較演算子と兼用で深さを正しく追えないため () [] だけを見る。
-    if (ch === '(' || ch === '[') depth++;
-    else if (ch === ')' || ch === ']') depth = Math.max(0, depth - 1);
-    out += depth === 0 && NON_ASCII_SPACE.test(ch) ? ' ' : ch;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inKeep(i)) { out += ch; continue; }
+    out += FULLWIDTH_MAP[ch] ?? (NON_ASCII_SPACE.test(ch) ? ' ' : ch);
   }
   return out;
 }
@@ -90,7 +103,6 @@ function fixFullWidthSpace(line) {
 // 「(値) を 四捨五入」の余分な空白も同じ理由で赤になるのでここで潰す。
 function fixPercentAndSpacing(line) {
   return line
-    .replace(/％/g, '%')
     .replace(/%\s+にする$/, '%にする')
     .replace(/を\s+四捨五入/g, 'を四捨五入');
 }
@@ -745,7 +757,7 @@ export function correctScratchBlocks(code) {
   const lines = corrected.split('\n');
   const fixedLines = lines.map(line => {
     let l = line.trim();
-    l = fixFullWidthSpace(l);   // 以降の正規表現が半角前提なので最初に正規化する
+    l = fixFullWidthChars(l);   // 以降の正規表現が半角前提なので最初に正規化する
     l = fixMessageBlock(l);
     l = fixKeyPressedBlock(l);
     l = fixCloneBlock(l);

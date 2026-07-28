@@ -420,17 +420,55 @@ const CreateModeChat = ({ onOpenSettings }) => {
       )
     ).map(s => s.name);
 
+  // 現在の全スプライトのブロックに直接かけて、赤ブロックを正しいデフォルトブロックに
+  // その場で置き換える。AIが同じ記法ミスを繰り返しても、ここで確実に直った形を残せる。
+  // 最新のgeneratingメッセージを corrected な全スプライト＋replaceAll で上書きする。
+  const applyCorrectorLocally = useCallback(() => {
+    const current = mergeGeneratingSprites(
+      messagesRef.current.filter(
+        m => m.role === 'assistant' && m.parsed?.phase === 'generating' && m.parsed?.sprites?.length
+      )
+    );
+    if (!current.length) return;
+    const corrected = current.map(s => ({ ...s, blocks: correctScratchBlocks(s.blocks || '') }));
+
+    setMessages(prev => {
+      const idx = [...prev].map((m, i) => ({ m, i }))
+        .filter(({ m }) => m.role === 'assistant' && m.parsed?.phase === 'generating')
+        .at(-1)?.i;
+      if (idx == null) return prev;
+      const updated = [...prev];
+      updated[idx] = {
+        ...updated[idx],
+        parsed: { ...updated[idx].parsed, sprites: corrected, replaceAll: true },
+      };
+      return updated;
+    });
+  }, []);
+
   const REBUILD_INSTRUCTION =
     `赤ブロックの最も多い原因は「かつ」「または」を横に連鎖させた条件式と、メッセージ名のドロップダウン記法漏れです。\n` +
     `条件式で「かつ」「または」を2回以上横につなげている箇所は、必ず「もし〜なら／でなければ」の入れ子に分解してください。\n` +
     `特にじゃんけんの勝敗判定は「または」を一切使わず、入れ子のif-elseだけで全9パターンを表現してください。\n` +
-    `メッセージ名は必ず (名前 v) の丸ドロップダウン記法で書いてください（Scratchのメッセージは楕円のメニュー。四角の [名前 v] にしない）。\n\n` +
+    `メッセージ名は必ず (名前 v) の丸ドロップダウン記法で書いてください（Scratchのメッセージは楕円のメニュー。四角の [名前 v] にしない）。\n` +
+    `記号と空白は必ず半角で書いてください。全角のスペース・％・（）・＜＞・＋－＊／が混ざるとブロックが赤くなります（見た目では半角と区別できません）。\n\n` +
     `⚠️ 赤ブロックの箇所だけを直し、すでに正しく動いている部分（指摘外のスプライト・ブロック）は1ブロックも変えず前回と同じ内容で返すこと。整理や書き換えで動いていた機能を壊さないこと。\n` +
     `Scratch 3.0の公式デフォルトブロックのみを使い、generatingフェーズで全スプライトのブロックを作り直してください。message には【Scratchで先に準備してください】ガイドを必ず含めること。`;
 
   const handleAutoFix = useCallback(async (invalidList) => {
     if (autoFixFiredRef.current) return;
     if (autoFixAttemptsRef.current >= MAX_AUTO_FIX_ATTEMPTS) return;
+
+    // まずAIに投げず決定論コレクターをかける。全角スペース・全角％のように
+    // 「半角と見た目が同じ」記法ミスは、AIが自分の出力の違いを認識できないため
+    // 再生成させても同じ文字を出し続け、赤が延々と直らない（実機で報告あり）。
+    // 機械で直せる分をここで潰し、次のレンダリングで赤が消えればAIを呼ばずに済む。
+    if (autoFixAttemptsRef.current === 0) {
+      autoFixAttemptsRef.current++;
+      applyCorrectorLocally();
+      // fireフラグは立てない＝再チェックで赤が残っていれば次にAIへ回る
+      return;
+    }
 
     autoFixFiredRef.current = true;
     autoFixAttemptsRef.current++;
@@ -460,35 +498,9 @@ const CreateModeChat = ({ onOpenSettings }) => {
     } finally {
       setIsAutoFixing(false);
     }
-  }, [callAPI, applyRebuildResult]);
+  }, [callAPI, applyRebuildResult, applyCorrectorLocally]);
 
   // まとめ直しの「保証ステップ」：AI再生成を待たず・AIに頼らず、決定論コレクターを
-  // 現在の全スプライトのブロックに直接かけて、赤ブロックを正しいデフォルトブロックに
-  // その場で置き換える。AIが同じ記法ミスを繰り返しても、ここで確実に直った形を残せる。
-  // 最新のgeneratingメッセージを corrected な全スプライト＋replaceAll で上書きする。
-  const applyCorrectorLocally = useCallback(() => {
-    const current = mergeGeneratingSprites(
-      messagesRef.current.filter(
-        m => m.role === 'assistant' && m.parsed?.phase === 'generating' && m.parsed?.sprites?.length
-      )
-    );
-    if (!current.length) return;
-    const corrected = current.map(s => ({ ...s, blocks: correctScratchBlocks(s.blocks || '') }));
-
-    setMessages(prev => {
-      const idx = [...prev].map((m, i) => ({ m, i }))
-        .filter(({ m }) => m.role === 'assistant' && m.parsed?.phase === 'generating')
-        .at(-1)?.i;
-      if (idx == null) return prev;
-      const updated = [...prev];
-      updated[idx] = {
-        ...updated[idx],
-        parsed: { ...updated[idx].parsed, sprites: corrected, replaceAll: true },
-      };
-      return updated;
-    });
-  }, []);
-
   // 手動再構築（「ブロックをまとめ直す」＝赤ブロック修正＋古い残骸の整理を兼ねるクリーン再構築）
   // 現在のゲームに必要なスプライト一式をフル生成し、結果でまるごと置き換える（replaceAll）。
   const handleManualRebuild = useCallback(async () => {
