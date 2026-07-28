@@ -91,15 +91,17 @@ export const completePreparationList = (parsed) => {
   if (!Array.isArray(parsed.sprites) || parsed.sprites.length === 0) return parsed;
   const message = parsed.message || '';
   const { vars, msgs, cloneLocal } = extractUsedNames(parsed.sprites);
-  const missingVars = [...vars].filter(v => !message.includes(v));
   const missingMsgs = [...msgs].filter(v => !message.includes(v));
   const sizeNote = buildCostumeSizeNote(parsed.sprites, message);
-  if (missingVars.length === 0 && missingMsgs.length === 0 && !sizeNote) return parsed;
 
-  // クローン固有の変数は「このスプライトのみ」で作らないと全クローンで共有され壊れる。
-  // 全体用とこのスプライトのみ（スプライト別）に振り分けて案内する。
-  const globalVars = missingVars.filter(v => !cloneLocal.has(v));
-  const localVars = missingVars.filter(v => cloneLocal.has(v));
+  // 全体用は「名前がどこかに書かれていれば足りている」と見なせる。
+  const globalVars = [...vars].filter(v => !cloneLocal.has(v) && !message.includes(v));
+
+  // スプライト専用は同じ判定が使えない。同じ名前でもスプライトごとに別の変数なので、
+  // 「テトラポット … 自分はクローンか」と1か所書いてあるだけで文字列一致してしまい、
+  // 貝がら用が抜けていても「もうある」と誤判定される（実際にそれで組めなくなった）。
+  // そのためスプライト専用はブロックから数えた全量を常に出し、機械側を確定版とする。
+  const localVars = [...cloneLocal.keys()];
   const localBySprite = new Map();
   const sharedNames = new Set();   // 複数スプライトが同名で必要とするもの
   for (const v of localVars) {
@@ -114,16 +116,18 @@ export const completePreparationList = (parsed) => {
   // 一目で分かるように「全体用は1行にまとめ／スプライト専用はスプライトごとに1行」。
   // 変数ごとに行を割いて注釈を繰り返すと、準備リストが読み下せない長さになる。
   const mark = (v) => `${v}${DISPLAY_VAR_KEYWORDS.some(k => v.includes(k)) ? '✅' : ''}`;
+  if (globalVars.length === 0 && localVars.length === 0 && missingMsgs.length === 0 && !sizeNote) return parsed;
+
   const lines = [];
-  if (missingVars.length || missingMsgs.length) {
-    lines.push('', '⚠️ 自動チェック：ブロックで使っているのに準備リストに無い名前がありました。こちらも作ってください。');
+  if (globalVars.length || localVars.length || missingMsgs.length) {
+    lines.push('', '⚠️ 自動チェック：ブロックから数えた変数・メッセージです。これが確定版なので、上の一覧と違っていたらこちらに合わせてください。');
   }
   if (globalVars.length) {
     lines.push('【全体用に追加】（変数を作る →「すべてのスプライト用」）');
     lines.push(`　${globalVars.map(mark).join('、')}`);
   }
   if (localBySprite.size) {
-    lines.push('【スプライト専用に追加】（そのスプライトを選んでから「このスプライトのみ」）');
+    lines.push('【スプライト専用】（そのスプライトを選んでから「このスプライトのみ」）');
     for (const [sp, vs] of localBySprite) {
       lines.push(`　${sp} … ${vs.map(v => `${mark(v)}${sharedNames.has(v) ? '（※）' : ''}`).join('、')}`);
     }
@@ -132,7 +136,7 @@ export const completePreparationList = (parsed) => {
       lines.push('　※（※）は他のスプライトにも同じ名前が必要です。スプライト専用の変数は他のスプライトからは見えないので、それぞれのスプライトで1つずつ作ってください。');
     }
   }
-  if (missingVars.length) {
+  if (globalVars.length || localVars.length) {
     lines.push('　※✅は画面に表示する変数です（変数ブロック左のチェックを入れる）。他は非表示。');
   }
   if (missingMsgs.length) {
