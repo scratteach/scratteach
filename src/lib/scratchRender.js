@@ -38,11 +38,33 @@ function recolorMathOf(node) {
   }
 }
 
+// 「([リスト v] の長さ)」をリスト（オレンジ）として描く。
+// 日本語版は OPERATORS_LENGTH（文字数・緑）と DATA_LENGTHOFLIST（リストの項目数・オレンジ）が
+// どちらも「%1 の長さ」で、ハッシュまで同一のため衝突する。scratchblocks は先に登録されている
+// stringLength（演算・緑）として解釈するので、リストの項目数を出すつもりで書いても
+// 緑の「文字数」ブロックの絵になってしまう。
+// 子どもはその絵のとおりに組むため、演算パレットの緑ブロックにリストを入れた別物ができあがり、
+// 「県名リストの長さ」が10ではなく連結文字列の文字数（40超）になって終了判定が働かない。
+// 引数がドロップダウン（[〇〇 v]）のときだけリスト版と確定できるので、カテゴリを list に直す。
+function recolorListLength(node) {
+  if (!node || typeof node !== 'object') return;
+  if (node.info?.selector === 'stringLength:') {
+    const first = Array.isArray(node.children) ? node.children[0] : null;
+    if (first?.isInput && first.shape === 'dropdown') {
+      node.info.category = 'list';
+    }
+  }
+  for (const key of ['scripts', 'blocks', 'children', 'contents']) {
+    if (Array.isArray(node[key])) node[key].forEach(recolorListLength);
+  }
+}
+
 // ブロックコードを補正して scratchblocks の SVG 要素を返す（画面・PDF共通）。
 export const renderScratchSVG = (code, scale = 1) => {
   const corrected = correctScratchBlocks(code);
   const doc = scratchblocks.parse(corrected, { languages: ['ja', 'en'] });
   recolorMathOf(doc);
+  recolorListLength(doc);
   return scratchblocks.render(doc, { style: 'scratch3', scale });
 };
 

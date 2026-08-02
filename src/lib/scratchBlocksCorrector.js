@@ -486,6 +486,43 @@ function fixStopOtherScripts(line) {
   return '[スプライトの他のスクリプトを止める v]';
 }
 
+// リスト操作ブロック行頭の余分な「リスト」を削る。
+// 日本語版で「リスト」の接頭辞が付くのは表示・非表示の2つ（DATA_SHOWLIST / DATA_HIDELIST）だけで、
+// 削除・追加・挿入・置き換えには付かない。同じスクリプト内に「リスト [〇〇 v] を隠す」があると、
+// AIは「リスト操作には『リスト』を付ける」と揃えてしまい
+// 「リスト [県名リスト v] のすべてを削除する」のような存在しないブロック＝赤ブロックを書く。
+// 行頭の「リスト」だけを落とせば正しいブロックに戻るので、表示・隠す以外は無条件で削る。
+function fixListPrefix(line) {
+  const t = line.trim();
+  if (!/^リスト\s+/.test(t)) return line;
+  if (/(を表示する|を隠す)$/.test(t)) return line; // 接頭辞が正しい2ブロックは触らない
+  return t.replace(/^リスト\s+/, '');
+}
+
+// 行全体を丸括弧で包まれた stack ブロックを剥がす。
+// 「([ざんねん] と (スコア)) と言う」のようにレポーターを引数に取る形を書くとき、AIは括弧の
+// 対応を崩して「([ざんねん] と言う)」のように文全体を () で包んでしまうことがある。
+// scratchblocks は外側の () を見てレポーター（楕円）として解釈するため、say 自体は正しいのに
+// 楕円の赤ブロックになり、しかも前後のブロックと繋がらない形で描かれる。
+// 行頭の ( が行末の ) と対応していて、中身が「言う／考える」で終わるときだけ外側を外す。
+function fixWrappedStackBlock(line) {
+  const t = line.trim();
+  if (!t.startsWith('(') || !t.endsWith(')')) return line;
+
+  // 行頭の ( が行末の ) と対応しているか（途中で閉じきる「(a) と (b)」を除外する）
+  let depth = 0;
+  for (let i = 0; i < t.length; i++) {
+    if (t[i] === '(') depth++;
+    else if (t[i] === ')') depth--;
+    if (depth === 0 && i < t.length - 1) return line;
+  }
+  if (depth !== 0) return line;
+
+  const inner = t.slice(1, -1).trim();
+  if (!/(と言う|と考える|秒言う|秒考える)$/.test(inner)) return line;
+  return inner;
+}
+
 // 「○○度に向ける」(MOTION_POINTINDIRECTION) の誤記を補正する。
 // 日本語版の正しいブロックは「(値) 度に向ける」。AIは座標ブロック（x座標を○にする）や
 // 変数ブロック（[変数 v] を ○ にする）に引きずられて、向きの先頭に「向き を」「[向き v] を」
@@ -788,6 +825,8 @@ export function correctScratchBlocks(code) {
     l = fixKeyPressedBlock(l);
     l = fixCloneBlock(l);
     l = fixStopOtherScripts(l);
+    l = fixListPrefix(l);
+    l = fixWrappedStackBlock(l);
     l = fixVariableDropdownInOperator(l);
     l = fixPointInDirection(l);
     l = fixTurnBlock(l);
