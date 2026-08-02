@@ -3,6 +3,7 @@ import InputBar from '../Chat/InputBar.jsx';
 import SpecSummary from './SpecSummary.jsx';
 import BlockDisplay from './BlockDisplay.jsx';
 import { callGemini, parseCreateModeResponse, GeminiAPIError, runGameQACheck } from '../../lib/gemini.js';
+import { detectPassthroughBlocks, buildPassthroughMessage } from '../../lib/passthroughBlocks.js';
 import { CREATE_MODE_SYSTEM_PROMPT } from '../../prompts/createModePrompt.js';
 import { detectGenre, buildGenreGenerationAddendum, buildGenreQARubric } from '../../prompts/genreTemplates.js';
 import { useCreateSession } from '../../hooks/useCreateSession.js';
@@ -276,6 +277,9 @@ const CreateModeChat = ({ onOpenSettings }) => {
   const autoFixAttemptsRef = useRef(0);
   const autoFixFiredRef = useRef(false);
   const qaFiredRef = useRef(false);
+  // 「そのまま表示して」で出したブロックは、赤が残ってもAIに投げ直さない
+  // （書き換えられたら「そのまま」の意味がなくなるため。決定論コレクターだけは効かせる）
+  const passthroughRef = useRef(false);
   const didAutoRestoreRef = useRef(false);
   const messagesRef = useRef(messages);
 
@@ -470,6 +474,10 @@ const CreateModeChat = ({ onOpenSettings }) => {
       return;
     }
 
+    // そのまま表示したブロックは、AIによる作り直しへ進ませない。
+    // 貼り元が間違っていた場合は、ユーザーが元のファイルを直すのが筋になる。
+    if (passthroughRef.current) return;
+
     autoFixFiredRef.current = true;
     autoFixAttemptsRef.current++;
     setIsAutoFixing(true);
@@ -611,6 +619,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
     autoFixAttemptsRef.current = 0;
     autoFixFiredRef.current = false;
     qaFiredRef.current = false;
+    passthroughRef.current = false;
 
     const userMessage = {
       role: 'user',
@@ -639,6 +648,32 @@ const CreateModeChat = ({ onOpenSettings }) => {
 
       if (currentSessionId) {
         await addMessageToDB(currentSessionId, userMessage);
+      }
+
+      // 「このscratchblocksを変更せずにブロックにして」と明示されたときは、
+      // AIを通さずそのまま描画する（作り直しで置換・脱落が起きるのを経路ごと防ぐ）。
+      const passthrough = detectPassthroughBlocks(text);
+      if (passthrough) {
+        passthroughRef.current = true;
+        const parsed = {
+          phase: 'generating',
+          message: buildPassthroughMessage(passthrough),
+          question: null,
+          spec: null,
+          sprites: passthrough.sprites,
+        };
+        const aiMessage = {
+          role: 'assistant',
+          content: parsed.message,
+          parsed,
+          timestamp: new Date().toISOString(),
+        };
+        setMessages(prev => [...prev, aiMessage]);
+        if (currentSessionId) {
+          await addMessageToDB(currentSessionId, aiMessage);
+          await updateSessionSprites(currentSessionId, parsed.sprites);
+        }
+        return; // QAゲートも通さない（採点結果でブロックを作り直させないため）
       }
 
       const result = await callAPI(text, imageData, currentMessages);
