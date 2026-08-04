@@ -4,6 +4,7 @@ import SpecSummary from './SpecSummary.jsx';
 import BlockDisplay from './BlockDisplay.jsx';
 import { callGemini, parseCreateModeResponse, GeminiAPIError, runGameQACheck } from '../../lib/gemini.js';
 import { detectPassthroughBlocks, buildPassthroughMessage } from '../../lib/passthroughBlocks.js';
+import { checkBlockLogic } from '../../lib/blockLogicCheck.js';
 import { CREATE_MODE_SYSTEM_PROMPT } from '../../prompts/createModePrompt.js';
 import { detectGenre, buildGenreGenerationAddendum, buildGenreQARubric } from '../../prompts/genreTemplates.js';
 import { useCreateSession } from '../../hooks/useCreateSession.js';
@@ -546,6 +547,8 @@ const CreateModeChat = ({ onOpenSettings }) => {
   //      APIキー不要・fail-openなし。構造から確実に検出する2種：
   //        - 当たり判定の競合（消滅が先に走って反射が出ず貫通する形）
   //        - デッドストア（直前の代入を読まずに上書き＝2つの変数を1つの名前に潰した形）
+  //      - リストの項目数と読み出す番目の食い違い／範囲外への挿入（checkBlockLogic）
+  //      - 送り先・受け手のいないメッセージ（checkBlockLogic）
   //   ② LLM意味ゲート（runGameQACheck）＝ジャンル検出時のみ。必須メカニクスの欠落を採点。
   //  どちらかが問題を挙げたら、両者の指摘をまとめて1回だけ作り直す。
   //  ※グリッド初期化のループ内巻き込み（1列バグ）は描画/補正の決定論パスで常時直すためここでは扱わない。
@@ -568,6 +571,11 @@ const CreateModeChat = ({ onOpenSettings }) => {
     // ① 決定論ロジックゲート（常時）
     const raceIssues = detectCollisionRace(merged);
     const deadStoreIssues = detectDeadStore(merged);
+    // リストの番目の食い違い・宛先のないメッセージ。ブロック単体は正しいのに
+    // 組み合わせが噛み合っていない形で、赤ブロック検査でもLLM採点でも捕まらない。
+    const logicIssues = checkBlockLogic(merged).map(i =>
+      i.spriteName ? `「${i.spriteName}」スプライト：${i.message}` : i.message
+    );
 
     // ② LLM意味ゲート（ジャンル検出＋APIキーがあるときだけ）
     const genreText = [...messagesRef.current.map(m => m.content || ''), newGenMessage?.content || ''].join('\n');
@@ -584,7 +592,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
       }
     }
 
-    const problems = [...raceIssues, ...deadStoreIssues, ...llmProblems];
+    const problems = [...raceIssues, ...deadStoreIssues, ...logicIssues, ...llmProblems];
     if (!problems.length) return; // 合格ならそのまま表示
 
     // 指摘をまとめて1回だけ作り直し
