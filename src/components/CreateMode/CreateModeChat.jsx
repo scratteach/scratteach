@@ -281,6 +281,15 @@ const CreateModeChat = ({ onOpenSettings }) => {
   // 「そのまま表示して」で出したブロックは、赤が残ってもAIに投げ直さない
   // （書き換えられたら「そのまま」の意味がなくなるため。決定論コレクターだけは効かせる）
   const passthroughRef = useRef(false);
+  // 素通し表示かどうかは、refではなく最新のgeneratingメッセージ自身に持たせた値で判定する。
+  // refはページを読み込み直すと false に戻るため、PWAの自動更新などでリロードが挟まると
+  // ガードが外れ、復元したブロックがAIに作り直されて壊れる（実機で発生）。
+  const isPassthroughActive = useCallback(() => {
+    if (passthroughRef.current) return true;
+    const last = [...messagesRef.current].reverse()
+      .find(m => m.role === 'assistant' && m.parsed?.phase === 'generating' && m.parsed?.sprites?.length);
+    return Boolean(last?.parsed?.passthrough);
+  }, []);
   const didAutoRestoreRef = useRef(false);
   const messagesRef = useRef(messages);
 
@@ -410,6 +419,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
           ...result.parsed,
           message: originalMessage || result.parsed.message,
           spec: result.parsed.spec || originalSpec,
+          passthrough: false, // AIが作り直した内容は「そのまま」ではない
           ...(replaceAll ? { replaceAll: true } : {}),
         },
       };
@@ -477,7 +487,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
 
     // そのまま表示したブロックは、AIによる作り直しへ進ませない。
     // 貼り元が間違っていた場合は、ユーザーが元のファイルを直すのが筋になる。
-    if (passthroughRef.current) return;
+    if (isPassthroughActive()) return;
 
     autoFixFiredRef.current = true;
     autoFixAttemptsRef.current++;
@@ -507,7 +517,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
     } finally {
       setIsAutoFixing(false);
     }
-  }, [callAPI, applyRebuildResult, applyCorrectorLocally]);
+  }, [callAPI, applyRebuildResult, applyCorrectorLocally, isPassthroughActive]);
 
   // まとめ直しの「保証ステップ」：AI再生成を待たず・AIに頼らず、決定論コレクターを
   // 手動再構築（「ブロックをまとめ直す」＝赤ブロック修正＋古い残骸の整理を兼ねるクリーン再構築）
@@ -521,6 +531,14 @@ const CreateModeChat = ({ onOpenSettings }) => {
 
     // まずAIに頼らず決定論補正をかけて赤ブロックを確実に直す（AIが失敗してもこの結果が残る）。
     applyCorrectorLocally();
+
+    // 素通し表示のブロックはAIに投げない。書き換えられたら「変更せずに表示して」の
+    // 意味が無くなるうえ、作り直しの過程で新しい赤ブロックが混入する。
+    if (isPassthroughActive()) {
+      autoFixFiredRef.current = false;
+      setIsAutoFixing(false);
+      return;
+    }
 
     const names = currentSpriteNames();
     const namesLine = names.length
@@ -540,7 +558,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
       autoFixFiredRef.current = false;
       setIsAutoFixing(false);
     }
-  }, [callAPI, applyRebuildResult, applyCorrectorLocally, isAutoFixing, isLoading]);
+  }, [callAPI, applyRebuildResult, applyCorrectorLocally, isAutoFixing, isLoading, isPassthroughActive]);
 
   // 動作QAゲート：generating結果が出たあとに2段で採点する。
   //   ① 決定論ロジックゲート（detectCollisionRace / detectDeadStore）＝ジャンル非依存・
@@ -565,6 +583,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
       newGenMessage ? [...priorGen, newGenMessage] : priorGen
     );
     if (!merged.length) return;
+    if (isPassthroughActive()) return; // 素通し表示は採点も作り直しもしない
 
     qaFiredRef.current = true;
 
@@ -618,7 +637,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
     } finally {
       setIsAutoFixing(false);
     }
-  }, [callAPI, applyRebuildResult]);
+  }, [callAPI, applyRebuildResult, isPassthroughActive]);
 
   const handleSend = useCallback(async (text, imageData) => {
     if ((!text && !imageData) || isLoading) return;
@@ -669,6 +688,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
           question: null,
           spec: null,
           sprites: passthrough.sprites,
+          passthrough: true, // リロードで復元しても素通しだと分かるように保存する
         };
         const aiMessage = {
           role: 'assistant',

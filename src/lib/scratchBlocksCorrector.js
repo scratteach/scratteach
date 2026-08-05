@@ -107,6 +107,18 @@ function fixPercentAndSpacing(line) {
     .replace(/を\s+四捨五入/g, 'を四捨五入');
 }
 
+// 「大きさを (50) %」のように行末の「にする」が落ちた形を直す。
+// AIが作り直すときに動詞を落としがちで、そのまま赤ブロックになる
+// （fixMissingSetVerb は「[〇〇 v] を 値」の変数ブロック専用なのでここは拾えない）。
+// 対象は %で終わる2ブロック（大きさ・音量）だけに絞り、引数が完結しているときだけ補う。
+function fixMissingPercentVerb(line) {
+  const m = line.trim().match(/^(大きさを|音量を)\s*(.+?)\s*%$/);
+  if (!m) return line;
+  const arg = m[2].trim();
+  if (!arg) return line;
+  return `${m[1]} ${arg} %にする`;
+}
+
 // 「大きさを 25 %にする」のように引数の括弧が落ちた形を直す（fixBareNumArg の % 版）。
 // 対象は %にする で終わる2ブロック（大きさ・音量）。文字列/ドロップダウンは触らない。
 function fixBarePercentArg(line) {
@@ -833,6 +845,7 @@ export function correctScratchBlocks(code) {
     l = fixOfReporterDropdownShape(l);
     l = fixMathFuncForm(l);
     l = fixPercentAndSpacing(l);
+    l = fixMissingPercentVerb(l);
     l = fixBarePercentArg(l);
     l = fixRoundForm(l);
     l = fixNegatedCondition(l);
