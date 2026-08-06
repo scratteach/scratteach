@@ -8,7 +8,7 @@ export const useGeminiChat = (onOpenSettings) => {
 
   const sendMessage = useCallback(async (userText, conversationHistory = [], imageData = null) => {
     const apiKey = localStorage.getItem('scratteach_api_key');
-    const model = localStorage.getItem('scratteach_model') || 'gemini-3.1-flash-lite';
+    const model = localStorage.getItem('scratteach_model') || 'gemini-3.5-flash-lite';
     const blockLang = localStorage.getItem('scratteach_block_lang') || 'ja';
 
     if (!apiKey) {

@@ -28,7 +28,7 @@ export const createConversation = async (firstMessage, model, mode = 'question')
     mode,
     createdAt: now,
     updatedAt: now,
-    model: model || 'gemini-3.1-flash-lite',
+    model: model || 'gemini-3.5-flash-lite',
     messages: [],
     ...(mode === 'create' ? { gameStatus: 'planning', spec: {} } : {}),
   };

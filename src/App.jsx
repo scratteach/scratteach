@@ -69,7 +69,7 @@ const AuthenticatedApp = () => {
       return;
     }
 
-    const model = localStorage.getItem('scratteach_model') || 'gemini-3.1-flash-lite';
+    const model = localStorage.getItem('scratteach_model') || 'gemini-3.5-flash-lite';
 
     const userMessage = {
       role: 'user',

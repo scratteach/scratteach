@@ -354,7 +354,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
 
   const callAPI = useCallback(async (userText, imageData, history) => {
     const apiKey = localStorage.getItem('scratteach_api_key');
-    const model = localStorage.getItem('scratteach_model') || 'gemini-3.1-flash-lite';
+    const model = localStorage.getItem('scratteach_model') || 'gemini-3.5-flash-lite';
 
     if (!apiKey) {
       setError('APIキーが設定されていません。設定画面からAPIキーを入力してください。');
@@ -600,7 +600,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
     const genreText = [...messagesRef.current.map(m => m.content || ''), newGenMessage?.content || ''].join('\n');
     const genre = detectGenre(genreText);
     const apiKey = localStorage.getItem('scratteach_api_key');
-    const model = localStorage.getItem('scratteach_model') || 'gemini-3.1-flash-lite';
+    const model = localStorage.getItem('scratteach_model') || 'gemini-3.5-flash-lite';
     let llmProblems = [];
     if (genre && apiKey) {
       try {
@@ -665,7 +665,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
 
     try {
       if (!currentSessionId) {
-        const model = localStorage.getItem('scratteach_model') || 'gemini-3.1-flash-lite';
+        const model = localStorage.getItem('scratteach_model') || 'gemini-3.5-flash-lite';
         const newSession = await startNewSession(text, model);
         if (newSession) {
           currentSessionId = newSession.id;

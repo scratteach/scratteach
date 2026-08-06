@@ -36,10 +36,16 @@ const EyeIcon = ({ show }) => (
 
 const MODELS = [
   {
-    id: 'gemini-3.1-flash-lite',
-    label: 'Gemini 3.1 Flash Lite',
+    id: 'gemini-3.5-flash-lite',
+    label: 'Gemini 3.5 Flash Lite',
     description: '推奨・高速・無料枠あり',
     badge: '推奨',
+  },
+  {
+    id: 'gemini-3.1-flash-lite',
+    label: 'Gemini 3.1 Flash Lite',
+    description: 'ひとつ前の版（3.5が不調なときの控え）',
+    badge: null,
   },
   {
     id: 'gemma-4-27b-it',
@@ -51,7 +57,7 @@ const MODELS = [
 
 const SettingsModal = ({ isOpen, onClose }) => {
   const [apiKey, setApiKey] = useState('');
-  const [model, setModel] = useState('gemini-3.1-flash-lite');
+  const [model, setModel] = useState('gemini-3.5-flash-lite');
   const [blockLang, setBlockLang] = useState('ja');
   const [showKey, setShowKey] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
@@ -60,7 +66,7 @@ const SettingsModal = ({ isOpen, onClose }) => {
   useEffect(() => {
     if (isOpen) {
       const storedKey = localStorage.getItem('scratteach_api_key') || '';
-      const storedModel = localStorage.getItem('scratteach_model') || 'gemini-3.1-flash-lite';
+      const storedModel = localStorage.getItem('scratteach_model') || 'gemini-3.5-flash-lite';
       const storedBlockLang = localStorage.getItem('scratteach_block_lang') || 'ja';
       setApiKey(storedKey);
       setModel(storedModel);
