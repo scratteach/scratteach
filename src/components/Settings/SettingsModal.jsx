@@ -128,7 +128,7 @@ const SettingsModal = ({ isOpen, onClose }) => {
                 type={showKey ? 'text' : 'password'}
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                placeholder="AIza..."
+                placeholder="コピーしたAPIキーを貼り付け"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2.5 pr-10 text-base md:text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent font-mono"
               />
               <button
@@ -169,9 +169,27 @@ const SettingsModal = ({ isOpen, onClose }) => {
               <ol className="mt-2 space-y-1.5 text-xs text-gray-600 bg-gray-50 rounded-lg p-3 list-decimal list-inside">
                 <li>上の「Google AI StudioでAPIキーを取得」ボタンを押す</li>
                 <li>Googleアカウントでログインする</li>
-                <li>「APIキーを作成（Create API key）」をクリックする</li>
-                <li><span className="font-mono">AIza…</span> で始まるキーが表示されたらコピーする</li>
-                <li>この画面の入力欄に貼り付けて「保存する」を押す</li>
+                <li>
+                  画面を下にスクロールして「<span className="font-medium">Get an API key</span>」を押す
+                  <span className="block ml-4 mt-0.5 text-gray-500">
+                    左上にハンバーガーメニュー（三本線）がある場合は、そこから「Dashboard」を選ぶ
+                  </span>
+                </li>
+                <li>
+                  「<span className="font-medium">APIキー</span>」タブのまま、プロジェクトを選ぶ
+                  <span className="block ml-4 mt-0.5 text-gray-500">
+                    「Default Gemini API Key」でよい（新しく作ってもよい）
+                  </span>
+                </li>
+                <li>右上の「<span className="font-medium">APIキーを作成</span>」を押す</li>
+                <li>
+                  「APIキー」の欄にあるコピーアイコンを押してコピーする
+                  <span className="block ml-4 mt-0.5 text-gray-500">
+                    長い英数字の文字列です。始まりの文字はキーによって違うので、
+                    手で写さず必ずコピーアイコンを使ってください
+                  </span>
+                </li>
+                <li>スクラッティーチに戻り、上の入力欄に貼り付けて「保存する」を押す</li>
               </ol>
             )}
           </div>
