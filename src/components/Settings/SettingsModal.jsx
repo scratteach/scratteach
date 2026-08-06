@@ -98,9 +98,13 @@ const SettingsModal = ({ isOpen, onClose }) => {
       onClick={(e) => e.target === e.currentTarget && onClose()}
       onKeyDown={handleKeyDown}
     >
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+      {/* スマホで内容が画面より高くなるとどこもスクロールできなくなるため、
+          カードに高さの上限を付けて中身だけを縦スクロールさせる。
+          dvh を使うのは、iOS Safari のアドレスバー・ツールバーの分を差し引くため
+          （vh だと下端が隠れて保存ボタンに届かない）。 */}
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md flex flex-col max-h-[90dvh]">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+        <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <h2 className="text-lg font-semibold text-gray-900">設定</h2>
           <button
             onClick={onClose}
@@ -112,7 +116,7 @@ const SettingsModal = ({ isOpen, onClose }) => {
         </div>
 
         {/* Content */}
-        <div className="px-6 py-5 space-y-6">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-6 py-5 space-y-6">
           {/* API Key */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
@@ -260,7 +264,7 @@ const SettingsModal = ({ isOpen, onClose }) => {
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-gray-100 flex gap-3">
+        <div className="shrink-0 px-6 py-4 border-t border-gray-100 flex gap-3">
           <button
             onClick={onClose}
             className="flex-1 px-4 py-2.5 rounded-lg border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
