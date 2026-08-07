@@ -31,7 +31,7 @@ const extractUsedNames = (sprites) => {
       // ハット（「〜とき」で始まるスクリプトの起点）でクローン文脈か判定し直す
       if (line.endsWith('とき')) {
         inClone = line === 'クローンされたとき';
-        const hm = line.match(/^\((.+?) v\) を受け取ったとき$/);
+        const hm = line.match(/^[[(](.+?) v[\])] を受け取ったとき$/);
         if (hm) msgs.add(hm[1]);
         continue;
       }

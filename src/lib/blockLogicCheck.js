@@ -24,7 +24,7 @@ const RE = {
   replaceAt: /^\[(.+?) v\] の \((\d+)\) 番目を /,
   setRandom: /^\[(.+?) v\] を \(\((\d+)\) から \((\d+)\) までの乱数\) にする$/,
   broadcast: /^\((.+?) v\) を送(る|って待つ)$/,
-  onBroadcast: /^\((.+?) v\) を受け取ったとき$/,
+  onBroadcast: /^[[(](.+?) v[\])] を受け取ったとき$/,
 };
 
 function eachLine(sprites, fn) {
@@ -57,7 +57,7 @@ function checkMessages(sprites) {
       issues.push({
         kind: 'message-no-receiver',
         spriteName: where,
-        message: `メッセージ「${msg}」を送っているのに、受け取る「(${msg} v) を受け取ったとき」がどのスプライトにもありません。送っても何も起きません。`,
+        message: `メッセージ「${msg}」を送っているのに、受け取る「[${msg} v] を受け取ったとき」がどのスプライトにもありません。送っても何も起きません。`,
       });
     }
   }

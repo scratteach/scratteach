@@ -46,19 +46,16 @@ const COMPOUND_REPORTER_PATTERNS = [
   /^\(コスチュームの \[.+? v\]\)$/,
 ];
 
-// メッセージ名トークンを正しいドロップダウン記法 (名前 v) に正規化する。
-// メッセージのメニューは Scratch では「丸い（楕円）プルダウン」＝scratchblocksでは (名前 v)。
-// 四角の [名前 v] でも broadcast 自体は成立するが形が四角になり本物と食い違うため、丸 () に統一する。
-// 例： 判定開始 → (判定開始 v) / [判定開始 v] → (判定開始 v) / [判定開始] → (判定開始 v)
-function toMessageDropdown(token) {
+// メッセージ名トークンから名前だけを取り出す（記法のゆれを吸収する）。
+// 例： 判定開始 / [判定開始 v] / (判定開始 v) / [判定開始] → いずれも「判定開始」
+function messageName(token) {
   const t = token.trim();
   const m =
     t.match(/^\[(.+?)\s+v\]$/) ||  // [x v]
     t.match(/^\((.+?)\s+v\)$/) ||  // (x v)
     t.match(/^\[(.+?)\]$/) ||      // [x]
     t.match(/^\((.+?)\)$/);        // (x)
-  const name = (m ? m[1] : t).trim();
-  return `(${name} v)`;
+  return (m ? m[1] : t).trim();
 }
 
 // 全角文字を半角へ正規化する（ブラケットの外側だけ）。
@@ -166,18 +163,27 @@ function fixRoundForm(line) {
   return l;
 }
 
-// メッセージブロック（送る／送って待つ／受け取ったとき）のメッセージ名を
-// 丸ドロップダウン (名前 v) に正規化する。プレーンテキスト名（例：「判定開始 を送る」）は
-// 赤ブロックになり、四角 [名前 v] は形が本物（楕円）と食い違うため、どちらも丸 () に直す。
+// メッセージブロックのメッセージ名を、本物と同じメニューの形に正規化する。
+// Scratchでは「受け取ったとき」だけメニューの持ち方が違う：
+//   ・を送る／を送って待つ … 丸い入力スロットにメニューが入る＝楕円 → (名前 v)
+//   ・を受け取ったとき　　 … ブロックに直付けのフィールド＝四角　 → [名前 v]
+// どちらの書き方でもブロック自体は正しく解決されるが、形が本物と食い違うと
+// 子どもがパレットから探すときに迷う。プレーンテキスト名（「判定開始 を送る」）は
+// そもそも赤ブロックになるので、まとめてここで直す。
 // 長い接尾辞から順に判定すること（「を送って待つ」を「を送る」より先に）
-const MESSAGE_SUFFIXES = ['を送って待つ', 'を送る', 'を受け取ったとき'];
+const MESSAGE_SUFFIXES = [
+  { kw: 'を送って待つ', round: true },
+  { kw: 'を送る', round: true },
+  { kw: 'を受け取ったとき', round: false },
+];
 
 function fixMessageBlock(line) {
-  for (const kw of MESSAGE_SUFFIXES) {
+  for (const { kw, round } of MESSAGE_SUFFIXES) {
     const re = new RegExp(`^(.+?)\\s*${kw}$`);
     const match = line.match(re);
     if (match) {
-      return `${toMessageDropdown(match[1])} ${kw}`;
+      const name = messageName(match[1]);
+      return `${round ? `(${name} v)` : `[${name} v]`} ${kw}`;
     }
   }
   return line;
