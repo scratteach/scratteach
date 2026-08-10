@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import ScratchBlockPanel from '../Chat/ScratchBlockPanel.jsx';
 import { exportSpriteToPDF } from '../../lib/pdfExport.js';
+import CustomBlockGuide from './CustomBlockGuide.jsx';
 
 const ChevronIcon = ({ isOpen }) => (
   <svg
@@ -145,6 +146,10 @@ const BlockDisplay = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks,
           </button>
         )}
       </div>
+
+      {/* 定義ブロック（自分で作るブロック）が含まれるときだけ、作り方を先に出す。
+          パレットに並んでいないので、案内が無いとどこから出すのか分からない。 */}
+      <CustomBlockGuide sprites={sprites} />
 
       <div id={`${idPrefix}-all`} className="space-y-0">
         {sprites.map((sprite, i) => (
