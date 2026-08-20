@@ -48,11 +48,16 @@ const DROPDOWN_JA = {
   "don't rotate": '回転しない',
   'all around': '自由に回転',
   // クローン・触れた・行く先
-  _myself_: '自分自身',
-  '_mouse_': 'マウスのポインター',
-  '_edge_': '端',
-  '_random_': 'どこかの場所',
-  '_stage_': 'ステージ',
+  // ※scratchblocks のテキストでは "_myself_" ではなく "myself" のように、
+  //   Scratch の画面に出ている綴りをそのまま書く
+  myself: '自分自身',
+  'mouse-pointer': 'マウスのポインター',
+  edge: '端',
+  'random position': 'どこかの場所',
+  Stage: 'ステージ',
+  // リストの何番目か（「random」は背景の「random backdrop」と綴りが違うので衝突しない）
+  last: '最後',
+  random: 'どれか',
   // 「〇〇の△△」の属性
   'x position': 'x座標',
   'y position': 'y座標',
@@ -90,10 +95,11 @@ const DROPDOWN_JA = {
   // 音の効果
   pitch: 'ピッチ',
   pan: '左右にパン',
-  // 背景・コスチュームの送り
-  next: '次の背景',
-  previous: '前の背景',
-  random: 'どれかの背景',
+  // 背景・コスチュームの送り（Scratchの選択肢は2語なので、リストの「random」と衝突しない）
+  'next backdrop': '次の背景',
+  'previous backdrop': '前の背景',
+  'random backdrop': 'どれかの背景',
+  'next costume': '次のコスチューム',
   // 日付
   year: '年',
   month: '月',
