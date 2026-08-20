@@ -7,6 +7,7 @@ import { detectPassthroughBlocks, buildPassthroughMessage } from '../../lib/pass
 import { checkBlockLogic } from '../../lib/blockLogicCheck.js';
 import { CREATE_MODE_SYSTEM_PROMPT } from '../../prompts/createModePrompt.js';
 import { detectGenre, buildGenreGenerationAddendum, buildGenreQARubric } from '../../prompts/genreTemplates.js';
+import { checkGenreIdioms } from '../../lib/genreIdiomCheck.js';
 import { useCreateSession } from '../../hooks/useCreateSession.js';
 import { exportSessionToPDF } from '../../lib/pdfExport.js';
 import { correctScratchBlocks } from '../../lib/scratchBlocksCorrector.js';
@@ -596,9 +597,16 @@ const CreateModeChat = ({ onOpenSettings }) => {
       i.spriteName ? `「${i.spriteName}」スプライト：${i.message}` : i.message
     );
 
-    // ② LLM意味ゲート（ジャンル検出＋APIキーがあるときだけ）
     const genreText = [...messagesRef.current.map(m => m.content || ''), newGenMessage?.content || ''].join('\n');
     const genre = detectGenre(genreText);
+
+    // ①-2 ジャンルの必須イディオム（常時・決定論）
+    // 見本がプロンプトに届いていても、AIが核心を使わずに別のやり方で出すことがある
+    // （実機：タイピングでキーイベントを文字ごとに作る形。赤ブロックは0なので誰も気づけない）。
+    // 「この形が入っているか」だけなら機械で確実に判定できる。
+    const idiomIssues = checkGenreIdioms(genre, merged);
+
+    // ② LLM意味ゲート（ジャンル検出＋APIキーがあるときだけ）
     const apiKey = localStorage.getItem('scratteach_api_key');
     const model = localStorage.getItem('scratteach_model') || 'gemini-3.5-flash-lite';
     let llmProblems = [];
@@ -611,7 +619,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
       }
     }
 
-    const problems = [...raceIssues, ...deadStoreIssues, ...logicIssues, ...llmProblems];
+    const problems = [...raceIssues, ...deadStoreIssues, ...logicIssues, ...idiomIssues, ...llmProblems];
     if (!problems.length) return; // 合格ならそのまま表示
 
     // 指摘をまとめて1回だけ作り直し
