@@ -149,6 +149,21 @@ export function translateBlocksToJa(englishText) {
     .join('\n');
 }
 
+/**
+ * 英語で書かれていれば日本語に翻訳し、すでに日本語なら何もしない。
+ *
+ * 移行期のAIの出力や、ユーザーが日本語で貼り込む素通し経路が混ざっても壊れないようにする。
+ * 判定は「括弧の中身（名前・文章・ドロップダウン）を取り除いた骨組みに かな が残るか」で行う。
+ * 英語のブロックの骨組みは必ず半角英字だけになり、日本語のブロックには必ず かな が残る。
+ * say [ずっと] のように名前や文章に日本語が入っていても、骨組みには出てこないので誤判定しない。
+ */
+export function translateBlocksToJaIfEnglish(text) {
+  if (!text || !text.trim()) return text ?? '';
+  const skeleton = text.replace(/\[[^[\]]*\]|\([^()]*\)|<[^<>]*>/g, ' ');
+  if (/[ぁ-んァ-ヶ]/.test(skeleton)) return text; // すでに日本語のブロック文
+  return translateBlocksToJa(text);
+}
+
 // C系ブロックの開き・閉じは1行だけでは解釈できないので、素通しする語として持っておく。
 // （日本語→英語は見本の移行にしか使わないが、ライブラリの stringify は入れ子を崩すため
 //   1行ずつ変換して、字下げと end はこちらの元テキストのものを保つ）

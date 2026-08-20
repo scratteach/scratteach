@@ -1,5 +1,6 @@
 import { SYSTEM_PROMPT, SYSTEM_PROMPT_EN } from './systemPrompt.js';
 import { correctScratchBlocks } from './scratchBlocksCorrector.js';
+import { translateBlocksToJaIfEnglish } from './blocksEnToJa.js';
 
 export const getSystemPrompt = (blockLang) =>
   blockLang === 'en' ? SYSTEM_PROMPT_EN : SYSTEM_PROMPT;
@@ -219,10 +220,21 @@ export const completePreparationList = (parsed) => {
   return { ...parsed, message: newMessage };
 };
 
+// AIは英語の scratchblocks でブロックを書く（日本語の語順に引っ張られて赤ブロックになるのを
+// 構造的に防ぐため）。ここで日本語に直してから、以降の補正・検査・描画へ流す。
+// これより後ろの処理はすべて今までどおり日本語のブロックを受け取る。
+const translateSprites = (parsed) => {
+  if (!parsed || !Array.isArray(parsed.sprites) || parsed.sprites.length === 0) return parsed;
+  return {
+    ...parsed,
+    sprites: parsed.sprites.map(s => ({ ...s, blocks: translateBlocksToJaIfEnglish(s.blocks || '') })),
+  };
+};
+
 export const parseCreateModeResponse = (text) => {
   try {
     const clean = text.replace(/^```json\s*|\s*```$/g, '').trim();
-    return completePreparationList(disambiguateLocalVars(JSON.parse(clean)));
+    return completePreparationList(disambiguateLocalVars(translateSprites(JSON.parse(clean))));
   } catch {
     return { phase: 'planning', message: text, question: null, spec: {}, sprites: null };
   }
