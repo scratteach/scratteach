@@ -253,7 +253,13 @@ export const parseAIResponse = (text) => {
   try {
     // ```json ... ``` のコードブロックを除去
     const clean = text.replace(/```json\n?|\n?```/g, '').trim();
-    return JSON.parse(clean);
+    const parsed = JSON.parse(clean);
+    // 質問モードもブロックは英語で書かせている（日本語の語順に引っ張られて
+    // 赤ブロックになるのを構造的に防ぐため）。ここで日本語に直してから流す。
+    if (parsed && typeof parsed.blocks === 'string') {
+      parsed.blocks = translateBlocksToJaIfEnglish(parsed.blocks);
+    }
+    return parsed;
   } catch {
     return { explanation: text, blocks: null, reason: null, hint: null };
   }

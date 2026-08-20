@@ -574,6 +574,17 @@ function fixListItemOrder(line) {
   return l;
 }
 
+// リストへの追加を日本語として自然な語順で書いてしまう誤りを直す（実機で発生）。
+//   ❌ [もんだい v] に [日本の一番高い山は？] を追加する   ← 「リストに〜を追加する」
+//   ⭕️ [日本の一番高い山は？] を [もんだい v] に追加する   ← ブロックは「値 を リスト に」
+// AIには英語で書かせているので本来ここへは来ないが、質問モードで日本語のまま
+// 書かれて赤18個になった実例がある。経路が増えたときの受け皿として残す。
+function fixListAddOrder(line) {
+  const m = line.trim().match(/^\[([^[\]]+) v\] に (.+?) を追加する$/);
+  if (!m) return line;
+  return `${m[2]} を [${m[1]} v] に追加する`;
+}
+
 // 行全体を丸括弧で包まれた stack ブロックを剥がす。
 // 「([ざんねん] と (スコア)) と言う」のようにレポーターを引数に取る形を書くとき、AIは括弧の
 // 対応を崩して「([ざんねん] と言う)」のように文全体を () で包んでしまうことがある。
@@ -954,6 +965,7 @@ export function correctScratchBlocks(code) {
     l = fixStopOtherScripts(l);
     l = fixListPrefix(l);
     l = fixListItemOrder(l);
+    l = fixListAddOrder(l);
     l = fixWrappedStackBlock(l);
     l = fixVariableDropdownInOperator(l);
     l = fixPointInDirection(l);

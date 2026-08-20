@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { blocksForDisplay, getBlockLang } from '../../lib/blocksEnToJa.js';
 import MessageBubble from './MessageBubble.jsx';
 import InputBar from './InputBar.jsx';
 import ScratchBlockPanel from './ScratchBlockPanel.jsx';
@@ -156,7 +157,7 @@ const ChatWindow = ({
             </p>
           </div>
           <div className="flex-1 overflow-y-auto p-4">
-            <ScratchBlockPanel code={activeBlock} />
+            <ScratchBlockPanel code={blocksForDisplay(activeBlock, getBlockLang())} />
           </div>
         </div>
       )}

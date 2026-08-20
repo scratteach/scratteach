@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { blocksForDisplay, getBlockLang } from '../../lib/blocksEnToJa.js';
 import ScratchBlockPanel from './ScratchBlockPanel.jsx';
 
 const ChevronIcon = ({ isOpen }) => (
@@ -142,7 +143,7 @@ const AIMessage = ({ message, messageIndex, activeIndex, onSetActiveIndex, isDes
             defaultOpen={true}
             accentColor="orange"
           >
-            <ScratchBlockPanel code={parsed.blocks} />
+            <ScratchBlockPanel code={blocksForDisplay(parsed.blocks, getBlockLang())} />
           </Accordion>
         )}
 
