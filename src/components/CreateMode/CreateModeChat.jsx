@@ -8,6 +8,7 @@ import { checkBlockLogic } from '../../lib/blockLogicCheck.js';
 import { CREATE_MODE_SYSTEM_PROMPT } from '../../prompts/createModePrompt.js';
 import { detectGenre, buildGenreGenerationAddendum, buildGenreQARubric } from '../../prompts/genreTemplates.js';
 import { checkGenreIdioms } from '../../lib/genreIdiomCheck.js';
+import { translateBlocksToJaIfEnglish } from '../../lib/blocksEnToJa.js';
 import { useCreateSession } from '../../hooks/useCreateSession.js';
 import { exportSessionToPDF } from '../../lib/pdfExport.js';
 import { correctScratchBlocks } from '../../lib/scratchBlocksCorrector.js';
@@ -255,12 +256,30 @@ const BlockPanel = ({ sprites, spec, gameTitle, onModifySpec, onInvalidBlocks, o
 // ・後の生成が同名スプライトを上書き（位置は初出順を維持）
 // ・新しい名前は末尾に追加
 // ・replaceAll フラグ付きの生成（クリーン再構築）はそこで一旦全消去してから積み直す
+// 表示のたびに翻訳し直すので、同じ本文は使い回す（描画は何度も走るため）
+const translateCache = new Map();
+const toJa = (blocks) => {
+  if (!blocks) return blocks;
+  if (translateCache.has(blocks)) return translateCache.get(blocks);
+  const out = translateBlocksToJaIfEnglish(blocks);
+  if (translateCache.size > 200) translateCache.clear();
+  translateCache.set(blocks, out);
+  return out;
+};
+
 const mergeGeneratingSprites = (genMsgs) => {
   const map = new Map();
   for (const m of genMsgs) {
     if (m.parsed?.replaceAll) map.clear();
+    // 素通し表示（ユーザーが「変更せずに表示して」と指示したもの）は一字一句そのまま出す
+    const keepAsIs = !!m.parsed?.passthrough;
     for (const s of (m.parsed?.sprites || [])) {
-      if (s && s.name) map.set(s.name, s);
+      if (!s || !s.name) continue;
+      // 生成の入口でも日本語にしているが、ここでもう一度通す。
+      // 過去のセッションで英語のまま保存されたものや、作り直しで一部のスプライトだけが
+      // 返ってきた場合に、古い英語が画面に残り続けるのを防ぐ（実機で発生）。
+      // すでに日本語なら何も変わらないので、重ねてかけても害はない。
+      map.set(s.name, keepAsIs ? s : { ...s, blocks: toJa(s.blocks || '') });
     }
   }
   return [...map.values()];
