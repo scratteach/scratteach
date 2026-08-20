@@ -174,12 +174,23 @@ function tidy(text) {
 }
 
 /**
- * 英語の scratchblocks を日本語に翻訳する。
- * 変数名・メッセージ名などユーザーの言葉はそのまま残る。
+ * scratchblocks を日本語に翻訳する。変数名・メッセージ名などユーザーの言葉はそのまま残る。
+ *
+ * 英語と日本語の両方で解釈する。こうすると、
+ *   ・英語のブロック → 日本語になる
+ *   ・すでに日本語のブロック → そのまま（日本語へ翻訳しても何も変わらない）
+ *   ・混ざっている場合 → 英語の行だけ日本語になる
+ * のすべてが1つの経路で扱えるので、「英語か日本語か」を当てる必要がない。
+ *
+ * 当てようとして失敗した経緯（実機で発生）：
+ * 最初は「括弧を除いた骨組みに かな が残るか」で見分けていた。ところが
+ * カスタムブロックの名前は日本語で括弧も持たない（define データを作る）。
+ * 見本どおりカスタムブロックを使った出力が来た途端、スプライト全体が
+ * 「もう日本語だ」と誤判定され、英語のまま画面に出た。
  */
 export function translateBlocksToJa(englishText) {
   if (!englishText || !englishText.trim()) return englishText ?? '';
-  const doc = parse(englishText, { languages: ['en'] });
+  const doc = parse(englishText, { languages: ['en', 'ja'] });
   doc.translate(allLanguages.ja);
   const text = tidy(doc.stringify());
   const userNames = collectUserNames(englishText + '\n' + text);
@@ -189,22 +200,10 @@ export function translateBlocksToJa(englishText) {
     .join('\n');
 }
 
-/**
- * 英語で書かれていれば日本語に翻訳し、すでに日本語なら何もしない。
- *
- * 移行期のAIの出力や、ユーザーが日本語で貼り込む素通し経路が混ざっても壊れないようにする。
- * 判定は「括弧の中身（名前・文章・ドロップダウン）を取り除いた骨組みに かな が残るか」で行う。
- * 英語のブロックの骨組みは必ず半角英字だけになり、日本語のブロックには必ず かな が残る。
- * say [ずっと] のように名前や文章に日本語が入っていても、骨組みには出てこないので誤判定しない。
- */
+/** ブロックの行に混ざった注釈を落としてから日本語に翻訳する（生成の入口で使う） */
 export function translateBlocksToJaIfEnglish(text) {
   if (!text || !text.trim()) return text ?? '';
-  // 注釈が1行でも残っていると、その行の かな のせいでスプライト全体が
-  // 「日本語で書かれている」と誤判定され、まるごと翻訳されなくなる。先に落とす。
-  const clean = stripBlockAnnotations(text);
-  const skeleton = clean.replace(/\[[^[\]]*\]|\([^()]*\)|<[^<>]*>/g, ' ');
-  if (/[ぁ-んァ-ヶ]/.test(skeleton)) return clean; // すでに日本語のブロック文
-  return translateBlocksToJa(clean);
+  return translateBlocksToJa(stripBlockAnnotations(text));
 }
 
 // C系ブロックの開き・閉じは1行だけでは解釈できないので、素通しする語として持っておく。
