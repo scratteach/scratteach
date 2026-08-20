@@ -1,6 +1,7 @@
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { renderScratchSVG } from './scratchRender.js';
+import { blocksForDisplay, getBlockLang } from './blocksEnToJa.js';
 
 const MARGIN = 10; // mm
 const A4_W = 210;  // mm
@@ -236,7 +237,7 @@ const fitBlockWidth = (naturalWidthMm) => {
 // スプライトのブロックコードを画面外で描き直してキャンバス化する。
 // 戻り値: { canvas, cssW, cssH }（cssはBLOCK_SCALE適用後のCSSピクセル寸法）
 const renderBlocksCanvas = async (blocksCode) => {
-  const svg = renderScratchSVG(blocksCode, BLOCK_SCALE);
+  const svg = renderScratchSVG(blocksForDisplay(blocksCode, getBlockLang()), BLOCK_SCALE);
   const cssW = parseFloat(svg.getAttribute('width')) || 0;
   const cssH = parseFloat(svg.getAttribute('height')) || 0;
   svg.style.display = 'block';

@@ -79,6 +79,8 @@ const SettingsModal = ({ isOpen, onClose }) => {
     localStorage.setItem('scratteach_api_key', apiKey.trim());
     localStorage.setItem('scratteach_model', model);
     localStorage.setItem('scratteach_block_lang', blockLang);
+    // localStorage は変更を知らせてくれないので、開いている画面に自分で伝える
+    window.dispatchEvent(new Event('scratteach-block-lang-changed'));
     setSaved(true);
     setTimeout(() => {
       setSaved(false);

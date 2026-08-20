@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { blocksForDisplay, getBlockLang } from '../../lib/blocksEnToJa.js';
 import ScratchBlockPanel from '../Chat/ScratchBlockPanel.jsx';
 import { exportSpriteToPDF } from '../../lib/pdfExport.js';
 import CustomBlockGuide from './CustomBlockGuide.jsx';
@@ -22,6 +23,13 @@ const SpriteIcon = () => (
 const SpriteSection = ({ sprite, blockId, gameTitle, defaultOpen = false, onSpriteInvalidBlocks, onRebuild, isRebuilding }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
   const [isExporting, setIsExporting] = useState(false);
+  // 設定で「ブロック表記言語」を変えたら描き直す（localStorage は変更を通知しないため）
+  const [blockLang, setBlockLang] = useState(getBlockLang);
+  useEffect(() => {
+    const onChange = () => setBlockLang(getBlockLang());
+    window.addEventListener('scratteach-block-lang-changed', onChange);
+    return () => window.removeEventListener('scratteach-block-lang-changed', onChange);
+  }, []);
 
   // 折りたたみ状態に関係なく、ブロックのソースからPDF用に描き直して保存する
   const handleExportPDF = async (e) => {
@@ -73,7 +81,7 @@ const SpriteSection = ({ sprite, blockId, gameTitle, defaultOpen = false, onSpri
           📌 {sprite.description}
         </p>
         <ScratchBlockPanel
-          code={sprite.blocks}
+          code={blocksForDisplay(sprite.blocks, blockLang)}
           onInvalidBlocks={handleInvalidBlocks}
           onRebuild={onRebuild}
           isRebuilding={isRebuilding}

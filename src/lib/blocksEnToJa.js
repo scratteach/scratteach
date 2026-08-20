@@ -237,3 +237,35 @@ export function translateBlocksToEn(japaneseText) {
     })
     .join('\n');
 }
+
+// 表示のたびに翻訳し直すので、同じ本文は使い回す
+const displayCache = new Map();
+
+/**
+ * 設定の「ブロック表記言語」に合わせて、表示用のブロックを返す。
+ *
+ * 保存・検査は常に日本語で行う（補正器・ロジックゲート・必須イディオムのルールは
+ * 日本語の形で書いてあるため。英語でも検査しようとすると全部を2言語ぶん書き直すことになる）。
+ * 切り替えるのは**見せ方だけ**にして、中の仕組みは1つに保つ。
+ *
+ * @param {string} blocks 日本語のブロック
+ * @param {'ja'|'en'} lang 表示したい言語
+ */
+export function blocksForDisplay(blocks, lang) {
+  if (!blocks || lang !== 'en') return blocks;
+  const hit = displayCache.get(blocks);
+  if (hit !== undefined) return hit;
+  const out = translateBlocksToEn(blocks);
+  if (displayCache.size > 200) displayCache.clear();
+  displayCache.set(blocks, out);
+  return out;
+}
+
+/** localStorage の設定を読む（既定は日本語） */
+export function getBlockLang() {
+  try {
+    return localStorage.getItem('scratteach_block_lang') === 'en' ? 'en' : 'ja';
+  } catch {
+    return 'ja';
+  }
+}
