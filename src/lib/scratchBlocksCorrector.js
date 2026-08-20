@@ -517,6 +517,63 @@ function fixListPrefix(line) {
   return t.replace(/^リスト\s+/, '');
 }
 
+// リストの「n番目」を日本語として自然な語順で書いてしまう誤りを直す（実機で発生）。
+//   ❌ [問題 v] を (1) 番目の (問題リスト v) にする   ← 「1番目の問題リスト」と読める語順
+//   ⭕️ [問題 v] を ([問題リスト v] の (1) 番目) にする ← ブロックは「リスト の n番目」の順
+// 語順が逆だと入力として解釈できず、その行がまるごと赤ブロックになる（中の部品も個数に乗る）。
+// 「n番目を削除する」「n番目を〜で置き換える」は文（stack）なので、括弧では包まない。
+const LIST_ITEM_REVERSED = /\s*番目の\s*[([]\s*([^()[\]]+?)\s+v\s*[)\]]/;
+
+// s[closeIdx] の ')' に対応する開き括弧の位置を返す（見つからなければ -1）
+function matchOpenParen(s, closeIdx) {
+  let depth = 0;
+  for (let i = closeIdx; i >= 0; i--) {
+    if (s[i] === ')') depth++;
+    else if (s[i] === '(') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function fixListItemOrder(line) {
+  let l = line;
+  for (let guard = 0; guard < 8; guard++) {
+    const m = l.match(LIST_ITEM_REVERSED);
+    if (!m) break;
+
+    // 「番目」の直前にある番号の式を丸ごと取り出す（((問題番号) + (1)) のような入れ子も拾う）
+    const before = l.slice(0, m.index);
+    let start;
+    let index;
+    if (before.endsWith(')')) {
+      const open = matchOpenParen(before, before.length - 1);
+      if (open === -1) break;
+      start = open;
+      index = before.slice(open);
+    } else {
+      const bare = before.match(/(\d+)$/);
+      if (!bare) break;
+      start = before.length - bare[1].length;
+      index = `(${bare[1]})`;
+    }
+
+    const list = `[${m[1]} v]`;
+    const rest = l.slice(m.index + m[0].length);
+    // 削除・置き換えは stack ブロックなので「リスト の n 番目を…」と地続きにする
+    const isStack = /^\s*を\s*(?:削除する|.*で置き換える)/.test(rest);
+    // すでに丸括弧で包まれている場合（「(… 番目の (リスト v))」）は、包み直すと
+    // 二重括弧になって別の赤ブロックになるので、外側の括弧をそのまま使う
+    const wrapped = start > 0 && l[start - 1] === '(' && rest.startsWith(')');
+    const body = `${list} の ${index} 番目`;
+    l = isStack || wrapped
+      ? l.slice(0, start) + body + (isStack ? rest.replace(/^\s+/, '') : rest)
+      : l.slice(0, start) + `(${body})` + rest;
+  }
+  return l;
+}
+
 // 行全体を丸括弧で包まれた stack ブロックを剥がす。
 // 「([ざんねん] と (スコア)) と言う」のようにレポーターを引数に取る形を書くとき、AIは括弧の
 // 対応を崩して「([ざんねん] と言う)」のように文全体を () で包んでしまうことがある。
@@ -844,6 +901,7 @@ export function correctScratchBlocks(code) {
     l = fixCloneBlock(l);
     l = fixStopOtherScripts(l);
     l = fixListPrefix(l);
+    l = fixListItemOrder(l);
     l = fixWrappedStackBlock(l);
     l = fixVariableDropdownInOperator(l);
     l = fixPointInDirection(l);
