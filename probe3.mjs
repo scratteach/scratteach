@@ -1,0 +1,10 @@
+import fs from 'fs';
+import { parse, loadLanguages } from 'scratchblocks/syntax/index.js';
+const ja = JSON.parse(fs.readFileSync('./node_modules/scratchblocks/locales/ja.json','utf8'));
+loadLanguages({ ja });
+const doc = parse('[問題 v] を ([問題リスト v] の (1) 番目) にする', { languages:['ja'] });
+const b = doc.scripts[0].blocks[0];
+console.log('info のキー:', Object.keys(b.info));
+console.log('id:', b.info.id, '/ shape:', b.info.shape, '/ category:', b.info.category);
+console.log('selector:', b.info.selector, '/ args:', b.info.args);
+console.log('children:', b.children.map(c => ({ isInput: !!c.isInput, isLabel: !!c.isLabel, s: c.stringify ? c.stringify() : c.value })));
