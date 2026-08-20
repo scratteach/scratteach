@@ -20,6 +20,7 @@
 
 import { parse, allLanguages, loadLanguages } from 'scratchblocks/syntax/index.js';
 import jaLocale from 'scratchblocks/locales/ja.json' with { type: 'json' };
+import { stripBlockAnnotations } from './scratchBlocksCorrector.js';
 
 loadLanguages({ ja: jaLocale });
 
@@ -198,9 +199,12 @@ export function translateBlocksToJa(englishText) {
  */
 export function translateBlocksToJaIfEnglish(text) {
   if (!text || !text.trim()) return text ?? '';
-  const skeleton = text.replace(/\[[^[\]]*\]|\([^()]*\)|<[^<>]*>/g, ' ');
-  if (/[ぁ-んァ-ヶ]/.test(skeleton)) return text; // すでに日本語のブロック文
-  return translateBlocksToJa(text);
+  // 注釈が1行でも残っていると、その行の かな のせいでスプライト全体が
+  // 「日本語で書かれている」と誤判定され、まるごと翻訳されなくなる。先に落とす。
+  const clean = stripBlockAnnotations(text);
+  const skeleton = clean.replace(/\[[^[\]]*\]|\([^()]*\)|<[^<>]*>/g, ' ');
+  if (/[ぁ-んァ-ヶ]/.test(skeleton)) return clean; // すでに日本語のブロック文
+  return translateBlocksToJa(clean);
 }
 
 // C系ブロックの開き・閉じは1行だけでは解釈できないので、素通しする語として持っておく。

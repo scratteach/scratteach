@@ -877,10 +877,57 @@ const KNOWN_WRONG_BLOCKS = [
   },
 ];
 
+// AIがブロックの行に注釈を書き込んでしまうのを落とす（実機で発生・小さいモデルほど出る）。
+//   ❌ when [a v] key pressed ※Scratchのキーイベントを各文字分作成してください
+//   ❌ set [入力文字 v] to (join (入力文字) (a)) ←各キーに対応
+//   ❌ ※キー入力はScratchの「聞いて待つ」ではなく、キーイベントで制御します（行まるごと文章）
+// どれも「ブロックとして解釈できない文字列」が混ざるので、その行ごと赤ブロックになる。
+// 伝えたいことは message に書くべきもので、ブロックの行には居場所がない。
+//
+// 括弧の外にある ※ ← → 以降だけを落とす（[※ちゅうい] のような文字列は残す）。
+// 行全体が文章のもの（ブロックの部品が1つも無い）は行ごと落とす。
+const ANNOTATION_MARK = /[※←→]/;
+
+function stripAnnotation(line) {
+  const t = line.replace(/\s+$/, '');
+  if (!ANNOTATION_MARK.test(t)) return line;
+
+  let depth = 0;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if ('([<'.includes(c)) depth++;
+    else if (')]>'.includes(c)) depth--;
+    else if (depth === 0 && ANNOTATION_MARK.test(c)) {
+      return t.slice(0, i).replace(/\s+$/, '');
+    }
+  }
+  return line;
+}
+
+/**
+ * ブロックの行に混ざった注釈・説明文を落とす（翻訳の前にも通す）。
+ *
+ * 落とすのは「※ ← → から行末まで」だけに限る。
+ * 「括弧が無くて日本語の行は文章」といった広い判定にしてはいけない。
+ * 「隠す」「表示する」「タイマーをリセット」「緑の旗が押されたとき」など、
+ * 括弧を1つも持たない正しいブロックがいくらでもあり、まとめて消えてしまう。
+ */
+export function stripBlockAnnotations(code) {
+  if (!code) return code;
+  return code
+    .split('\n')
+    .map(line => [line, stripAnnotation(line)])
+    // 行まるごと注釈だった場合（※から始まる説明文）は、空行を残さず行ごと捨てる。
+    // 空行はスクリプトの区切りとして意味を持つので、残すと繋がりが切れる。
+    .filter(([orig, out]) => !(orig.trim() && !out.trim()))
+    .map(([, out]) => out)
+    .join('\n');
+}
+
 export function correctScratchBlocks(code) {
   if (!code) return code;
 
-  let corrected = code;
+  let corrected = stripBlockAnnotations(code);
 
   // Step 1: 既知の誤ったブロック名を修正
   for (const { wrong, right } of KNOWN_WRONG_BLOCKS) {
