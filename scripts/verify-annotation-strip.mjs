@@ -16,7 +16,9 @@ if <(残り時間) > (0)> then
   set [入力文字 v] to (join (入力文字) [a]) ←各キーに対応
   change [スコア v] by (1)
 end
-say [※ちゅうい] for (2) seconds`;
+say [※ちゅうい] for (2) seconds
+(※このように z キーまで同様に作成してください)
+stop [all v]`;
 
 console.log('=== AIが書いた形（注釈まみれ）===\n' + bad);
 console.log('\n赤ブロック（そのまま日本語化した場合）:', reds(bad));
@@ -24,3 +26,5 @@ const out = correctScratchBlocks(translateBlocksToJaIfEnglish(bad));
 console.log('\n=== 注釈を落として日本語化 ===\n' + out);
 console.log('\n赤ブロック:', reds(out) === 0 ? '✅ 0' : '❌ ' + reds(out));
 console.log('[※ちゅうい] は残っているか:', out.includes('※ちゅうい') ? '✅ 残っている（文字列の中なので触らない）' : '❌ 消してしまった');
+console.log('丸括弧の注釈（赤くならない）は落ちたか:', out.includes('z キーまで') ? '❌ 残っている' : '✅ 落ちた');
+console.log('[すべてを止める v] は残っているか:', out.includes('すべてを止める') ? '✅ 残っている' : '❌ 消してしまった');

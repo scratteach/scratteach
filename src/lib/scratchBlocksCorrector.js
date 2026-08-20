@@ -916,6 +916,11 @@ export function stripBlockAnnotations(code) {
   if (!code) return code;
   return code
     .split('\n')
+    // 丸括弧で包んだ注釈（(※このように z キーまで同様に作成してください) など）は
+    // **赤ブロックにならない**。存在しない変数のレポーター＝オレンジの楕円として描かれ、
+    // 検出をすり抜けて画面に残る（実機で発生）。行まるごとがこの形のときだけ落とす。
+    // ※ [すべてを止める v] のように角括弧だけの正しいブロックがあるので、丸括弧に限る。
+    .filter(line => !(/^\s*\(.*\)\s*$/.test(line) && ANNOTATION_MARK.test(line)))
     .map(line => [line, stripAnnotation(line)])
     // 行まるごと注釈だった場合（※から始まる説明文）は、空行を残さず行ごと捨てる。
     // 空行はスクリプトの区切りとして意味を持つので、残すと繋がりが切れる。
