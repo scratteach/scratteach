@@ -68,8 +68,6 @@ const DROPDOWN_JA = {
   'backdrop name': '背景の名前',
   size: '大きさ',
   volume: '音量',
-  number: '番号',
-  name: '名前',
   // 演算の関数
   abs: '絶対値',
   floor: '切り下げ',
@@ -119,9 +117,48 @@ const DROPDOWN_EN = Object.fromEntries(
   Object.entries(DROPDOWN_JA).map(([en, ja]) => [ja, en]),
 );
 
+// costume / backdrop の [number v] [name v] だけは、選択肢の名前が
+// 「番号」「名前」という、変数名としてもよく使われる言葉になる。
+// 前に costume / backdrop が付いている形でしか出てこないので、そこだけ切り出して訳す。
+const PHRASE_PAIRS = [
+  ['costume [number v]', 'costume [番号 v]'],
+  ['costume [name v]', 'costume [名前 v]'],
+  ['backdrop [number v]', 'backdrop [番号 v]'],
+  ['backdrop [name v]', 'backdrop [名前 v]'],
+];
+
+// その行のテキストで「変数・リストとして使われている名前」を集める。
+// 選択肢の名前とたまたま同じ日本語の変数（例：変数「番号」と コスチューム番号の「番号」）を、
+// 勝手に別の言葉へ書き換えてしまわないための除外リスト。
+const USER_NAME_RE = [
+  /set \[([^[\]]+?) v\] to/g,
+  /change \[([^[\]]+?) v\] by/g,
+  /(?:show|hide) variable \[([^[\]]+?) v\]/g,
+  /(?:add|insert)[^[\]]*?to \[([^[\]]+?) v\]/g,
+  /(?:delete|delete all|replace item)[^[\]]*?of \[([^[\]]+?) v\]/g,
+  /\[([^[\]]+?) v\] を [^\n]*?(?:にする|ずつ変える)/g,
+  /変数 \[([^[\]]+?) v\] を/g,
+  /\[([^[\]]+?) v\] (?:のすべてを削除する|に追加する)/g,
+  /\[([^[\]]+?) v\] の [^\n]*?番目/g,
+];
+
+function collectUserNames(text) {
+  const names = new Set();
+  for (const re of USER_NAME_RE) {
+    for (const m of text.matchAll(re)) names.add(m[1].trim());
+  }
+  return names;
+}
+
 // [〇〇 v] / (〇〇 v) の中身だけを差し替える。名前に空白を含む値（"up arrow" など）も拾う。
-function replaceDropdowns(line, table) {
-  return line.replace(/([[(])\s*([^[\]()]+?)\s+v\s*([\])])/g, (all, open, value, close) => {
+function replaceDropdowns(line, table, userNames) {
+  let out = line;
+  for (const [en, ja] of PHRASE_PAIRS) {
+    const [from, to] = table === DROPDOWN_JA ? [en, ja] : [ja, en];
+    out = out.split(from).join(to);
+  }
+  return out.replace(/([[(])\s*([^[\]()]+?)\s+v\s*([\])])/g, (all, open, value, close) => {
+    if (userNames?.has(value)) return all; // 利用者が付けた変数・リスト名は触らない
     const hit = table[value];
     return hit ? `${open}${hit} v${close}` : all;
   });
@@ -143,9 +180,11 @@ export function translateBlocksToJa(englishText) {
   if (!englishText || !englishText.trim()) return englishText ?? '';
   const doc = parse(englishText, { languages: ['en'] });
   doc.translate(allLanguages.ja);
-  return tidy(doc.stringify())
+  const text = tidy(doc.stringify());
+  const userNames = collectUserNames(englishText + '\n' + text);
+  return text
     .split('\n')
-    .map(l => replaceDropdowns(l, DROPDOWN_JA))
+    .map(l => replaceDropdowns(l, DROPDOWN_JA, userNames))
     .join('\n');
 }
 
@@ -175,6 +214,7 @@ const JA_PASSTHROUGH = { end: 'end', でなければ: 'else' };
  */
 export function translateBlocksToEn(japaneseText) {
   if (!japaneseText || !japaneseText.trim()) return japaneseText ?? '';
+  const userNames = collectUserNames(japaneseText);
   return japaneseText
     .split('\n')
     .map(raw => {
@@ -183,7 +223,7 @@ export function translateBlocksToEn(japaneseText) {
       if (!body) return '';
       if (JA_PASSTHROUGH[body]) return indent + JA_PASSTHROUGH[body];
 
-      const doc = parse(replaceDropdowns(body, DROPDOWN_EN), { languages: ['ja'] });
+      const doc = parse(replaceDropdowns(body, DROPDOWN_EN, userNames), { languages: ['ja'] });
       doc.translate(allLanguages.en);
       const out = tidy(doc.stringify())
         .split('\n')
