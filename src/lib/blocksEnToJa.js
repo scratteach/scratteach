@@ -68,6 +68,8 @@ const DROPDOWN_JA = {
   'backdrop name': '背景の名前',
   size: '大きさ',
   volume: '音量',
+  number: '番号',
+  name: '名前',
   // 演算の関数
   abs: '絶対値',
   floor: '切り下げ',
