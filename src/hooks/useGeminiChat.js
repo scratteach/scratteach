@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
-import { callGemini, parseAIResponse, GeminiAPIError } from '../lib/gemini.js';
+import { parseAIResponse, GeminiAPIError } from '../lib/gemini.js';
+import { callWithFallback } from '../lib/modelFallback.js';
 
 export const useGeminiChat = (onOpenSettings) => {
   const [messages, setMessages] = useState([]);
@@ -8,7 +9,6 @@ export const useGeminiChat = (onOpenSettings) => {
 
   const sendMessage = useCallback(async (userText, conversationHistory = [], imageData = null) => {
     const apiKey = localStorage.getItem('scratteach_api_key');
-    const model = localStorage.getItem('scratteach_model') || 'gemini-3.5-flash-lite';
     const blockLang = localStorage.getItem('scratteach_block_lang') || 'ja';
 
     if (!apiKey) {
@@ -29,13 +29,17 @@ export const useGeminiChat = (onOpenSettings) => {
     ];
 
     try {
-      const rawResponse = await callGemini(historyForAPI, apiKey, model, blockLang);
+      // 質問モードは lite 層でよい（人間が打つ速度なので 15/分 には当たらない）。
+      const { text: rawResponse, model: usedModel } = await callWithFallback(
+        historyForAPI, apiKey, { job: 'ask', blockLang }
+      );
       const parsed = parseAIResponse(rawResponse);
 
       return {
         role: 'assistant',
         content: rawResponse,
         parsed,
+        model: usedModel,
         timestamp: new Date().toISOString(),
       };
     } catch (err) {

@@ -17,6 +17,9 @@ const checks = [
   ['表示言語の切り替え（日本語／英語）', 'verify-display-lang.mjs'],
   ['カスタムブロック入りの出力が日本語になるか', 'verify-customblock-translation.mjs'],
   ['番目に使う変数が変わらない形を捕まえるか', 'verify-frozen-index.mjs'],
+  ['見本の題材が残ったままの出力を捕まえるか', 'verify-sample-theme.mjs'],
+  ['決めることリストの受け渡し（聞き残し・重複質問）', 'verify-plan-list.mjs'],
+  ['モデルの梯子（工程別の振り分け・枯れ記録・429の見分け）', 'verify-model-router.mjs'],
 ];
 
 let ng = 0;

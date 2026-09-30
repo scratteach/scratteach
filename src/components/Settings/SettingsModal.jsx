@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { version as APP_VERSION } from '../../../package.json';
+import { MODEL_LADDER, listExhausted, clearExhausted, listMissing, clearMissing, nextResetLabel } from '../../lib/modelRouter.js';
 
 const CloseIcon = () => (
   <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -34,12 +35,21 @@ const EyeIcon = ({ show }) => (
   )
 );
 
+// 既定は「おまかせ」＝工程ごとに自動で選ぶ。
+// 考える仕事（最初のリスト作成・ブロック生成・QA採点）は上のFlash層、
+// リストから1つ聞くだけの質問はLite層。枠を使い切ったモデルは自動で飛ばす。
 const MODELS = [
+  {
+    id: 'auto',
+    label: 'おまかせ（工程ごとに自動）',
+    description: '考えるところは上のモデル、質問は軽いモデル。使い切ったら自動で次へ',
+    badge: '推奨',
+  },
   {
     id: 'gemini-3.5-flash-lite',
     label: 'Gemini 3.5 Flash Lite',
-    description: '推奨・高速・無料枠あり',
-    badge: '推奨',
+    description: 'すべての工程をこれで固定する（枠が大きく、止まりにくい）',
+    badge: null,
   },
   {
     id: 'gemini-3.1-flash-lite',
@@ -47,17 +57,60 @@ const MODELS = [
     description: 'ひとつ前の版（3.5が不調なときの控え）',
     badge: null,
   },
-  {
-    id: 'gemma-4-27b-it',
-    label: 'Gemma 4 27B',
-    description: '高精度（レート制限に達した際の代替）',
-    badge: null,
-  },
 ];
+
+// 1日の枠を使い切って、いま自動で飛ばされているモデルの一覧。
+// 誤判定したときに気づけないまま一日待つことになるので、見えるところに出して手で戻せるようにする。
+const ExhaustedModels = () => {
+  const [list, setList] = useState(() => listExhausted());
+  const [missing, setMissing] = useState(() => listMissing());
+  if (!list.length && !missing.length) return null;
+  return (
+    <div className="mt-3 p-3 rounded-xl bg-gray-50 border border-gray-200 space-y-2">
+      {list.length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-gray-600 mb-1">
+            今日の回数を使い切ったモデル（{nextResetLabel()} に戻ります）
+          </p>
+          <ul className="text-xs text-gray-500 space-y-0.5">
+            {list.map(m => (
+              <li key={m} className="flex items-center justify-between gap-2">
+                <span className="truncate">{m}</span>
+                <button
+                  type="button"
+                  onClick={() => { clearExhausted(m); setList(listExhausted()); }}
+                  className="shrink-0 px-2 py-0.5 rounded border border-gray-300 hover:bg-white transition-colors"
+                >
+                  解除
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {missing.length > 0 && (
+        <div>
+          {/* 404が返ったモデル。IDの書き間違いや、まだ使えない版だと黙って飛ばされ続けるので見せる */}
+          <p className="text-xs font-medium text-gray-600 mb-1">使えなかったモデル（今後は飛ばします）</p>
+          <ul className="text-xs text-gray-500 space-y-0.5">
+            {missing.map(m => <li key={m} className="truncate">{m}</li>)}
+          </ul>
+          <button
+            type="button"
+            onClick={() => { clearMissing(); setMissing(listMissing()); }}
+            className="mt-1 text-xs px-2 py-0.5 rounded border border-gray-300 hover:bg-white transition-colors"
+          >
+            もう一度ためす
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const SettingsModal = ({ isOpen, onClose }) => {
   const [apiKey, setApiKey] = useState('');
-  const [model, setModel] = useState('gemini-3.5-flash-lite');
+  const [model, setModel] = useState('auto');
   const [blockLang, setBlockLang] = useState('ja');
   const [showKey, setShowKey] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
@@ -66,7 +119,7 @@ const SettingsModal = ({ isOpen, onClose }) => {
   useEffect(() => {
     if (isOpen) {
       const storedKey = localStorage.getItem('scratteach_api_key') || '';
-      const storedModel = localStorage.getItem('scratteach_model') || 'gemini-3.5-flash-lite';
+      const storedModel = localStorage.getItem('scratteach_model') || 'auto';
       const storedBlockLang = localStorage.getItem('scratteach_block_lang') || 'ja';
       setApiKey(storedKey);
       setModel(storedModel);
@@ -78,6 +131,8 @@ const SettingsModal = ({ isOpen, onClose }) => {
   const handleSave = () => {
     localStorage.setItem('scratteach_api_key', apiKey.trim());
     localStorage.setItem('scratteach_model', model);
+    // 自分で選んだ、という印。これが無い場合の保存値は昔の既定なので指定として扱わない。
+    localStorage.setItem('scratteach_model_chosen', '1');
     localStorage.setItem('scratteach_block_lang', blockLang);
     // localStorage は変更を知らせてくれないので、開いている画面に自分で伝える
     window.dispatchEvent(new Event('scratteach-block-lang-changed'));
@@ -235,6 +290,7 @@ const SettingsModal = ({ isOpen, onClose }) => {
                 </label>
               ))}
             </div>
+            <ExhaustedModels />
           </div>
 
           {/* Block Language */}

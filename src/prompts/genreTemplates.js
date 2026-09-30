@@ -795,9 +795,14 @@ const ITEM_DROP_PRINCIPLES = [
 // mechanics（必ず埋める成立条件）＋ idioms（正解形の手本）を渡す。pitfallsはQA側で使う。
 // ゴールデンサンプル（実機検証済みの完全見本）があるジャンルは、断片イディオムの代わりに
 // 完全見本を土台として注入する（ゼロから合成させない＝初回の正確さとドリフト防止）。
-export function buildGenreGenerationAddendum(tpl) {
+// includeGoldenSample＝見本の完成ブロックをプロンプトに載せるか。
+// 設計中（planning/reviewing/summary）は載せない。見本を先に見せると、AIの仕事が
+// 「その子のゲームを設計する」ではなく「見本をその子の言葉に翻訳する」に化けるため
+// （実機：パックマンと言われたのに、見本の貝がら拾いをそのまま提案した）。
+// 必須メカニクスは役割の言葉で書いてあるので、設計はこれだけで進められる。
+export function buildGenreGenerationAddendum(tpl, { includeGoldenSample = true } = {}) {
   if (!tpl) return '';
-  const golden = buildGoldenSampleSection(tpl.id);
+  const golden = includeGoldenSample ? buildGoldenSampleSection(tpl.id) : '';
   const mech = tpl.mechanics.map((m, i) => `${i + 1}. ${m}`).join('\n');
   const parts = [
     `## 【ジャンル別・必須メカニクス】検出ジャンル：${tpl.label}`,
@@ -818,7 +823,18 @@ export function buildGenreGenerationAddendum(tpl) {
     '### 必ず実装する必須メカニクス',
     mech,
   ];
-  if (golden) {
+  if (!includeGoldenSample) {
+    parts.push(
+      '',
+      '### いまは設計の段階（実装の見本はまだ渡していない）',
+      '上の必須メカニクスは【役割】の言葉で書いてある（プレイヤー／集めるもの／敵／壁 など）。',
+      'いまやることは、**その役割それぞれを、その子のゲームでは何が担うのかを決めること**。',
+      '例：迷路なら「主人公は何にする？」「集めるものは何？」「追いかけてくるのは何？」。',
+      'ブロックの書き方は generating で見本を渡すので、ここでは考えなくてよい。',
+      '【決定した仕様】には、役割ごとに決まった“このゲームでの名前”を必ず書くこと',
+      '（例：「・主人公：パックマン」「・集めるもの：ドット」「・敵：ゴースト」）。あとでブロックを書く土台になる。',
+    );
+  } else if (golden) {
     parts.push('', golden);
   } else {
     parts.push(
@@ -827,6 +843,7 @@ export function buildGenreGenerationAddendum(tpl) {
       '```',
       tpl.idioms,
       '```',
+      '※ この手本の中の名前（壁・そろえ など）は一例。上で決めた“このゲームでの名前”に置き換えて書くこと。',
     );
   }
   parts.push('', STARTUP_PRINCIPLES);

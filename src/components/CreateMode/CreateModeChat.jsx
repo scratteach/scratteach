@@ -2,12 +2,15 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import InputBar from '../Chat/InputBar.jsx';
 import SpecSummary from './SpecSummary.jsx';
 import BlockDisplay from './BlockDisplay.jsx';
-import { callGemini, parseCreateModeResponse, GeminiAPIError, runGameQACheck } from '../../lib/gemini.js';
+import { parseCreateModeResponse, GeminiAPIError, runGameQACheck } from '../../lib/gemini.js';
+import { callWithFallback } from '../../lib/modelFallback.js';
 import { detectPassthroughBlocks, buildPassthroughMessage } from '../../lib/passthroughBlocks.js';
 import { checkBlockLogic } from '../../lib/blockLogicCheck.js';
 import { CREATE_MODE_SYSTEM_PROMPT } from '../../prompts/createModePrompt.js';
 import { detectGenre, buildGenreGenerationAddendum, buildGenreQARubric } from '../../prompts/genreTemplates.js';
 import { checkGenreIdioms } from '../../lib/genreIdiomCheck.js';
+import { checkSampleThemeLeak } from '../../lib/sampleThemeCheck.js';
+import { collectPlan, latestSpec, buildPlanSection, remainingPlan } from '../../lib/planList.js';
 import { translateBlocksToJaIfEnglish } from '../../lib/blocksEnToJa.js';
 import { useCreateSession } from '../../hooks/useCreateSession.js';
 import { exportSessionToPDF } from '../../lib/pdfExport.js';
@@ -72,7 +75,7 @@ const UserBubble = ({ message }) => (
   </div>
 );
 
-const AIBubble = ({ message, isLatest, isLastGenerating, onApprove, onModify, gameTitle, isDesktop, onInvalidBlocks, onRebuild, onExportAll, isRebuilding, mergedSprites, mergedSpec }) => {
+const AIBubble = ({ message, isLatest, isLastGenerating, onApprove, onModify, gameTitle, isDesktop, onInvalidBlocks, onRebuild, onExportAll, isRebuilding, mergedSprites, mergedSpec, planProgress }) => {
   const parsed = message.parsed || {};
   const { phase, message: msg, question, spec } = parsed;
 
@@ -96,6 +99,11 @@ const AIBubble = ({ message, isLatest, isLastGenerating, onApprove, onModify, ga
             {question && (
               <div className="bg-sky-50 border border-sky-200 rounded-2xl rounded-tl-sm px-4 py-3 text-sm leading-relaxed text-sky-800 font-medium">
                 {formatText(question)}
+                {planProgress && planProgress.total > 0 && (
+                  <div className="mt-2 pt-2 border-t border-sky-200 text-xs font-normal text-sky-600">
+                    決めること {planProgress.done} / {planProgress.total}
+                  </div>
+                )}
               </div>
             )}
           </>
@@ -291,6 +299,8 @@ const CreateModeChat = ({ onOpenSettings }) => {
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isAutoFixing, setIsAutoFixing] = useState(false);
+  // 賢い層が混み合って、層を降りる前に待っているときの知らせ（黙って止まって見えないように）
+  const [waitNotice, setWaitNotice] = useState(null);
   const [error, setError] = useState(null);
   const [sessionId, setSessionId] = useState(null);
   const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 768);
@@ -374,7 +384,6 @@ const CreateModeChat = ({ onOpenSettings }) => {
 
   const callAPI = useCallback(async (userText, imageData, history) => {
     const apiKey = localStorage.getItem('scratteach_api_key');
-    const model = localStorage.getItem('scratteach_model') || 'gemini-3.5-flash-lite';
 
     if (!apiKey) {
       setError('APIキーが設定されていません。設定画面からAPIキーを入力してください。');
@@ -399,15 +408,44 @@ const CreateModeChat = ({ onOpenSettings }) => {
     // 質問せず必ず実装させる。未対応ジャンルは従来どおり（フォールバック）。
     const convoText = [...history.map(m => m.content || ''), userText].join('\n');
     const genre = detectGenre(convoText);
-    const systemPrompt = genre
-      ? `${CREATE_MODE_SYSTEM_PROMPT}\n\n${buildGenreGenerationAddendum(genre)}`
-      : CREATE_MODE_SYSTEM_PROMPT;
+
+    // 見本の完成ブロックは「作るとき」だけ渡す。設計中（planning/reviewing）から見せると、
+    // AIが見本を読み上げるだけになり、その子の題材が反映されない（実機：パックマンと
+    // 言われて貝がら拾いを提案した）。仕様が固まった summary 以降＝次はブロックを書く段、
+    // および generating（修正・作り直し）でだけ載せる。
+    const lastPhase = [...history].reverse()
+      .find(m => m.role === 'assistant' && m.parsed?.phase)?.parsed?.phase;
+    const includeGoldenSample = lastPhase === 'summary' || lastPhase === 'generating';
+
+    // 「決めることリスト」は最初の返答で1回だけ考えさせ、以後はアプリが覚えて毎回渡す。
+    // 毎ターン作り直させると一覧が揺れ、聞き残しが出る（＝これまでの状態）。
+    // どこまで決まったかはキーの照合で機械的に数えるので、AIの仕事は「次の1つを聞く」だけになる。
+    const planSection = lastPhase === 'generating'
+      ? ''
+      : buildPlanSection(collectPlan(history), latestSpec(history));
+
+    const systemPrompt = [
+      CREATE_MODE_SYSTEM_PROMPT,
+      genre ? buildGenreGenerationAddendum(genre, { includeGoldenSample }) : '',
+      planSection,
+    ].filter(Boolean).join('\n\n');
+
+    // 工程で賢さの要る度合いが違う。最初の1回（要望の分析＋「決めること」リスト作成）と
+    // ブロック生成・作り直しは賢い層、リストから1つ聞くだけの質問はlite層に振る。
+    const job = includeGoldenSample ? 'generate' : (lastPhase ? 'ask' : 'plan');
 
     try {
-      const raw = await callGemini(historyForAPI, apiKey, model, 'ja', systemPrompt);
+      const { text: raw, model: usedModel } = await callWithFallback(historyForAPI, apiKey, {
+        job,
+        blockLang: 'ja',
+        systemPrompt,
+        onWait: (sec) => setWaitNotice(`AIの順番待ちです（約${sec}秒）`),
+      });
+      setWaitNotice(null);
       const parsed = parseCreateModeResponse(raw);
-      return { raw, parsed };
+      return { raw, parsed, model: usedModel };
     } catch (err) {
+      setWaitNotice(null);
       if (err instanceof GeminiAPIError) {
         setError(err.message);
       } else {
@@ -625,39 +663,56 @@ const CreateModeChat = ({ onOpenSettings }) => {
     // 「この形が入っているか」だけなら機械で確実に判定できる。
     const idiomIssues = checkGenreIdioms(genre, merged);
 
+    // ①-3 見本の題材の残留（常時・決定論）
+    // 構造は正しいのに題材が見本のままという形。赤ブロックにもイディオム検査にも
+    // 引っかからないので、ここで見るしかない。比べるのは**ユーザー自身の発言だけ**
+    // （AIの発言を混ぜると、漏れた名前がそこに写っていて自分で打ち消してしまう）。
+    const userSaid = messagesRef.current
+      .filter(m => m.role === 'user')
+      .map(m => m.content || '')
+      .join('\n');
+    const themeIssues = checkSampleThemeLeak(genre?.id, merged, userSaid);
+
     // ② LLM意味ゲート（ジャンル検出＋APIキーがあるときだけ）
     const apiKey = localStorage.getItem('scratteach_api_key');
-    const model = localStorage.getItem('scratteach_model') || 'gemini-3.5-flash-lite';
     let llmProblems = [];
     if (genre && apiKey) {
       try {
-        const qa = await runGameQACheck(buildGenreQARubric(genre), merged, apiKey, model);
+        const qa = await runGameQACheck(buildGenreQARubric(genre), merged, apiKey);
         if (!qa.ok) llmProblems = [...(qa.missing || []), ...(qa.issues || [])];
       } catch (err) {
         console.error('QA gate (LLM) failed:', err);
       }
     }
 
-    const problems = [...raceIssues, ...deadStoreIssues, ...logicIssues, ...idiomIssues, ...llmProblems];
+    const problems = [...raceIssues, ...deadStoreIssues, ...logicIssues, ...idiomIssues, ...themeIssues, ...llmProblems];
     if (!problems.length) return; // 合格ならそのまま表示
 
     // 指摘をまとめて1回だけ作り直し
     setIsAutoFixing(true);
     try {
+      // 題材の付け替えが指摘に含まれるときは、名前を据え置かせると直せない
+      // （旧名のまま返るか、新旧が二重に並ぶ）。この回だけ改名を許し、結果で全部入れ替える。
+      const renaming = themeIssues.length > 0;
       const names = merged.map(s => s.name);
-      const namesLine = names.length
-        ? `\n現在のスプライト：${names.join('、')}。\nこれらを同じ名前のままsprites[]に入れて返してください（修正のないスプライトも省略せず含める）。`
-        : '';
+      const namesLine = !names.length
+        ? ''
+        : renaming
+          ? `\n現在のスプライト：${names.join('、')}。\nこのゲームに必要なスプライト一式を、新しい名前でsprites[]に過不足なく入れて返してください（古い名前のスプライトは含めない）。`
+          : `\n現在のスプライト：${names.join('、')}。\nこれらを同じ名前のままsprites[]に入れて返してください（修正のないスプライトも省略せず含める）。`;
       const detail = problems.map(p => `・${p}`).join('\n');
       const correctionText =
         `【動作チェックの指摘】\nこのゲームには次の不足・問題があり、まだゲームとして成立していません：\n${detail}${namesLine}\n\n` +
         `これらをすべて満たすよう、generatingフェーズで全スプライトのブロックを作り直してください。` +
         `特に上で指摘された必須メカニクスは必ずブロックとして実装すること。` +
-        `⚠️ ただし指摘された箇所だけを直し、すでに正しく動いている部分は1ブロックも変えず前回と同じ内容で返すこと（整理・書き換えで動いていた反射や当たり判定を壊さない）。` +
+        (renaming
+          ? `⚠️ 指摘された箇所だけを直すこと。名前の付け替えは全スプライトに及ぶが、変えてよいのは「名前」だけで、` +
+            `ブロックの並び・メッセージの流れ・当たり判定・座標の式は前回のまま返すこと（動いていた反射や当たり判定を書き換えない）。`
+          : `⚠️ ただし指摘された箇所だけを直し、すでに正しく動いている部分は1ブロックも変えず前回と同じ内容で返すこと（整理・書き換えで動いていた反射や当たり判定を壊さない）。`) +
         `message には【Scratchで先に準備してください】ガイド（STEP5の形式）を必ず含めること。`;
       const result = await callAPI(correctionText, null, messagesRef.current);
       if (result?.parsed?.phase === 'generating' && result.parsed.sprites) {
-        applyRebuildResult(result);
+        applyRebuildResult(result, { replaceAll: renaming });
       }
     } catch (err) {
       console.error('QA gate (rebuild) failed:', err);
@@ -738,6 +793,8 @@ const CreateModeChat = ({ onOpenSettings }) => {
           role: 'assistant',
           content: result.raw,
           parsed: result.parsed,
+          // 梯子を入れると、出来の差がモデル由来か運か分からなくなる。答えた実モデルを残す。
+          model: result.model,
           timestamp: new Date().toISOString(),
         };
 
@@ -802,6 +859,12 @@ const CreateModeChat = ({ onOpenSettings }) => {
     .at(-1)?.i ?? -1;
   const lastAIPhase = messages.filter(m => m.role === 'assistant').at(-1)?.parsed?.phase;
   const isChecking = isLoading && lastAIPhase === 'summary';
+  // 「決めることリスト」の進み具合。子どもに終わりが見えるようにする
+  // （これまでは何問聞かれるのか分からなかった）。
+  const planItems = collectPlan(messages);
+  const planProgress = planItems.length
+    ? { total: planItems.length, done: planItems.length - remainingPlan(planItems, latestSpec(messages)).length }
+    : null;
   const gameTitle = messages[0]?.content?.slice(0, 40) || 'ゲーム';
   const isEmpty = messages.length === 0;
 
@@ -839,6 +902,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
                       message={message}
                       isLatest={index === lastAIIndex}
                       isLastGenerating={index === lastGeneratingIndex}
+                      planProgress={index === lastAIIndex ? planProgress : null}
                       mergedSprites={mergedSprites}
                       mergedSpec={mergedSpec}
                       onApprove={handleApprove}
@@ -852,6 +916,9 @@ const CreateModeChat = ({ onOpenSettings }) => {
                     />
               ))}
               {isLoading && <LoadingDots isChecking={isChecking} />}
+              {waitNotice && (
+                <div className="text-xs text-gray-500 px-2 py-1">{waitNotice}</div>
+              )}
             </>
           )}
           <div ref={messagesEndRef} />

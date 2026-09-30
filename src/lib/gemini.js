@@ -241,11 +241,14 @@ export const parseCreateModeResponse = (text) => {
 };
 
 export class GeminiAPIError extends Error {
-  constructor(message, status, code) {
+  // details＝APIが返した error オブジェクトそのもの。429がRPM（1分5回）由来かRPD（1日20回）
+  // 由来かは、ここに入る RetryInfo / QuotaFailure でしか見分けられない。
+  constructor(message, status, code, details = null) {
     super(message);
     this.name = 'GeminiAPIError';
     this.status = status;
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -327,17 +330,18 @@ const parseQAResponse = (text) => {
 };
 
 // rubric: buildGenreQARubric() の出力 / sprites: [{name, blocks}]
-export const runGameQACheck = async (rubric, sprites, apiKey, model) => {
+// 採点は生成とは別のモデルに振る（modelRouter が 'qa' で梯子を1段ずらす）。
+// 同じモデルで採点すると同じ盲点を見落とすうえ、生成直後に投げるのでRPMも食い合う。
+export const runGameQACheck = async (rubric, sprites, apiKey) => {
+  const { callWithFallback } = await import('./modelFallback.js');
   const blocksText = (sprites || [])
     .map(s => `■ スプライト「${s.name}」\n${s.blocks}`)
     .join('\n\n');
   const userContent = `${rubric}\n\n=== 生成されたブロック ===\n${blocksText}`;
-  const raw = await callGemini(
+  const { text: raw } = await callWithFallback(
     [{ role: 'user', content: userContent }],
     apiKey,
-    model,
-    'ja',
-    GAME_QA_SYSTEM_PROMPT
+    { job: 'qa', blockLang: 'ja', systemPrompt: GAME_QA_SYSTEM_PROMPT }
   );
   return parseQAResponse(raw);
 };
@@ -383,7 +387,8 @@ export const callGemini = async (messages, apiKey, model, blockLang = 'ja', syst
       throw new GeminiAPIError(
         `APIキーが無効です。設定画面でAPIキーを確認してください。\n詳細: ${errorMessage}`,
         401,
-        'INVALID_API_KEY'
+        'INVALID_API_KEY',
+        errorData?.error || null
       );
     }
 
@@ -391,7 +396,8 @@ export const callGemini = async (messages, apiKey, model, blockLang = 'ja', syst
       throw new GeminiAPIError(
         `AIサーバーが混み合っています。\n数分置いてから、メッセージ欄に「続き」と入力して送信してください。`,
         429,
-        'RATE_LIMIT'
+        'RATE_LIMIT',
+        errorData?.error || null
       );
     }
 
@@ -399,7 +405,17 @@ export const callGemini = async (messages, apiKey, model, blockLang = 'ja', syst
       throw new GeminiAPIError(
         `AIサーバーが混み合っています。\n数分置いてから、メッセージ欄に「続き」と入力して送信してください。`,
         response.status,
-        'SERVER_BUSY'
+        'SERVER_BUSY',
+        errorData?.error || null
+      );
+    }
+
+    if (response.status === 404) {
+      throw new GeminiAPIError(
+        `そのモデルは使えません。${errorMessage}`,
+        404,
+        'MODEL_NOT_FOUND',
+        errorData?.error || null
       );
     }
 
@@ -407,14 +423,16 @@ export const callGemini = async (messages, apiKey, model, blockLang = 'ja', syst
       throw new GeminiAPIError(
         `リクエストが不正です。${errorMessage}`,
         400,
-        'BAD_REQUEST'
+        'BAD_REQUEST',
+        errorData?.error || null
       );
     }
 
     throw new GeminiAPIError(
       `AIサーバーが混み合っているか、一時的なエラーが発生しました。\n数分置いてから、メッセージ欄に「続き」と入力して送信してください。`,
       response.status,
-      'API_ERROR'
+      'API_ERROR',
+      errorData?.error || null
     );
   }
 
