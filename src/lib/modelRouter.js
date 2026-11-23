@@ -16,7 +16,10 @@ const MISSING_KEY = 'scratteach_missing_models';
 // 梯子。上から順に試す。数字が新しいものほど上。
 export const MODEL_LADDER = {
   smart: [
-    'gemini-4-hydrogen', // 2026-11-23 無料枠に追加（RPD 20）。最も賢いので先頭
+    // 'gemini-4-hydrogen', // 2026-11-23 無料枠に追加（RPD 20）。最も賢い。
+    //   リリース直後で 503 が続き（断りが届くまで2分以上のことも）、先頭に置くと
+    //   毎回3回投げ直してから降りるぶん待たされるだけだった。混雑が落ち着く
+    //   2027年1〜2月ごろに先頭へ戻して試す（2026-11-24 一時的に外した）。
     'gemini-3.8-flash',
     'gemini-3.7-flash',
     'gemini-3.6-flash',
