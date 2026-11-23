@@ -16,6 +16,7 @@
 // ロジック（もし↔繰り返す等）には触らないため、貼り元の赤ブロックが自動で直る利点が上回る。
 
 import { correctScratchBlocks } from './scratchBlocksCorrector.js';
+import { translateBlocksToJaIfEnglish } from './blocksEnToJa.js';
 import scratchblocks from './scratchRender.js';
 
 // 「変えないで」と「ブロックにして」の両方が要る。片方だけの雑談で誤発動させない。
@@ -25,7 +26,9 @@ const WANT_BLOCKS = /(ブロック|scratchblocks|スクラッチブロック)/i;
 // 見出し・注記・区切り線は描画対象から外す（ブロックではないため）
 const DECORATION = /^(={3,}|-{3,}|[■【※]|\/\/|--)/;
 
-const SPRITE_HEADER = /^■\s*スプライト\s*[「『]?(.+?)[」』]?\s*$/;
+// 見出しの記号は ■ に限らない（▶ や # で書かれたファイルが1体にまとまり、
+// 見出し行が赤ブロックになった。実機で発生）。「スプライト」の語が付いている行だけを見出しとみなす。
+const SPRITE_HEADER = /^(?:[■□▶▷►▼●◆◇★☆]|#{1,6})\s*スプライト\s*[「『:：]?\s*(.+?)\s*[」』]?\s*$/;
 const OTHER_HEADER = /^■/;
 
 function isRecognizedBlock(line) {
@@ -88,6 +91,56 @@ function splitIntoSprites(text) {
     .filter(s => s.blocks.trim());
 }
 
+// 最初のスプライト見出しより前にある【】の欄（変数・メッセージ・音・コスチュームなどの準備メモ）を拾う。
+// 以前は捨てていたが、素通しでも「事前準備を見せる」作法は守る。貼り元に書いてあるのが
+// いちばん正確な情報（クローン用の「このスプライトのみ」や表示する変数など、
+// ブロックから機械で数えると取り違えるもの）なので、書き換えずにそのまま載せる。
+const NOTE_HEADER = /^【([^】]+)】\s*(.*)$/;
+const NOTE_END = /^(={3,}|-{3,})\s*$/;
+
+function extractNotes(text) {
+  const notes = [];
+  let current = null;
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/\s+$/, '');
+    if (SPRITE_HEADER.test(line) || OTHER_HEADER.test(line)) break;
+    const h = line.match(NOTE_HEADER);
+    if (h) {
+      current = { title: h[1].trim(), lines: h[2] ? [h[2]] : [] };
+      notes.push(current);
+      continue;
+    }
+    if (NOTE_END.test(line.trim())) { current = null; continue; }
+    if (current) current.lines.push(line);
+  }
+  return notes
+    .map(n => ({ title: n.title, body: n.lines.join('\n').replace(/^\n+|\n+$/g, '') }))
+    .filter(n => n.title);
+}
+
+// 【仕様】【決定した仕様】など、欄の名前に「仕様」を含む欄だけを仕様のまとめとして扱う。
+// 素通しには会話が無いので、AIに推測で書かせず、貼り元に書いてあるものだけを使う。
+// 「キー：値」の行はそのまま項目に、そうでない行は番号を振った項目にする。
+const SPEC_TITLE = /仕様/;
+
+function notesToSpec(notes) {
+  const specNotes = notes.filter(n => SPEC_TITLE.test(n.title));
+  if (!specNotes.length) return null;
+  const spec = {};
+  let n = 0;
+  for (const note of specNotes) {
+    for (const raw of note.body.split('\n')) {
+      const t = raw.trim().replace(/^([・※\-*]|\d+[.．)）])\s*/, '');
+      if (!t) continue;
+      n++; // 名前付きの行も数える（番号を貼り元の行の順番とそろえるため）
+      const kv = t.match(/^([^：:]{1,20})[：:]\s*(.+)$/);
+      if (kv && !(kv[1].trim() in spec)) spec[kv[1].trim()] = kv[2].trim();
+      else spec[`仕様${n}`] = t;
+    }
+  }
+  return Object.keys(spec).length ? spec : null;
+}
+
 // 指示は「貼り付け本文の外」＝メッセージの先頭か末尾にあるものだけを見る。
 // 本文の注記にたまたま「そのまま」と書かれていても発動させないため
 // （明示指示のときだけ、という約束を機械的に守る）。
@@ -111,9 +164,16 @@ export function detectPassthroughBlocks(text) {
   if (recognized < 3 || !allLines.some(isHatBlock)) return null;
 
   let correctedLines = 0;
+  let translated = false;
   const finalSprites = sprites.map(s => {
-    const corrected = correctScratchBlocks(s.blocks);
-    const before = s.blocks.split('\n');
+    // 英語で貼られても日本語の正規表記に直す（AIの生成物と同じ入口の変換）。
+    // 翻訳は表引きなのでロジックは1つも変わらない＝「そのまま」の約束は破らない。
+    // 補正器・ロジックゲート・表示言語の切り替えはどれも日本語を前提にしているので、
+    // 英語のまま通すと補正が効かず、設定を日本語にしていても英語で出てしまう（実機で発生）。
+    const ja = translateBlocksToJaIfEnglish(s.blocks);
+    if (ja.trim() !== s.blocks.trim()) translated = true;
+    const corrected = correctScratchBlocks(ja);
+    const before = ja.split('\n');
     const after = corrected.split('\n');
     for (let i = 0; i < Math.max(before.length, after.length); i++) {
       if ((before[i] || '').trim() !== (after[i] || '').trim()) correctedLines++;
@@ -125,14 +185,28 @@ export function detectPassthroughBlocks(text) {
     };
   });
 
-  return { sprites: finalSprites, correctedLines, blockLines: recognized };
+  const allNotes = extractNotes(text);
+  return {
+    sprites: finalSprites, correctedLines, blockLines: recognized, translated,
+    spec: notesToSpec(allNotes),
+    notes: allNotes.filter(n => !SPEC_TITLE.test(n.title)), // 仕様の欄は事前準備と二重に出さない
+  };
 }
 
-export function buildPassthroughMessage({ sprites, correctedLines }) {
+export function buildPassthroughMessage({ sprites, correctedLines, translated, notes = [], spec = null }) {
   const names = sprites.map(s => `「${s.name}」`).join('・');
-  const head = `貼っていただいたブロックを、書き換えずにそのまま表示しました（スプライト${sprites.length}体：${names}）。`;
+  const head = `貼っていただいたブロックを、書き換えずにそのまま表示しました（スプライト${sprites.length}体：${names}）。`
+    + (translated ? '\n\n英語の表記で書かれていたので、日本語の表記に直して表示しています（ブロックの中身は同じです）。' : '');
   const note = correctedLines
     ? `\n\n記法のゆれを ${correctedLines} 行だけ自動補正しています（Scratchに存在する正しい書き方に直しただけで、プログラムの中身は変えていません）。元のファイルも見直してみてください。`
     : '\n\nそのまま組めば動く記法になっています。';
-  return head + note;
+  const prep = notes.length
+    ? '\n\n■ 事前準備（貼っていただいたメモのまま載せています）\n\n'
+      + notes.map(n => `【${n.title}】${n.body ? '\n' + n.body : ''}`).join('\n\n')
+      + '\n\n準備ができたら、下記を見ながらブロックを組んでください👇'
+    : '';
+  const specText = spec
+    ? '\n\n■ 仕様のまとめ（貼っていただいたメモのまま）\n' + Object.entries(spec).map(([k, v]) => `・${k}：${v}`).join('\n')
+    : '\n\n※ 貼っていただいたメモに【仕様】の欄が無いので、仕様のまとめは出していません。';
+  return head + note + specText + prep;
 }

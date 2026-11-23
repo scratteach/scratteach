@@ -768,7 +768,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
           phase: 'generating',
           message: buildPassthroughMessage(passthrough),
           question: null,
-          spec: null,
+          spec: passthrough.spec, // 貼り元の【仕様】欄（無ければ null）。PDFの「決定した仕様」に出る
           sprites: passthrough.sprites,
           passthrough: true, // リロードで復元しても素通しだと分かるように保存する
         };
