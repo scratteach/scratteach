@@ -13,7 +13,7 @@ globalThis.localStorage = {
   removeItem: k => { delete store[k]; },
 };
 
-const { planModels, quotaDay, nextResetLabel, markExhausted, clearExhausted, listExhausted, MODEL_LADDER }
+const { planModels, quotaDay, nextResetLabel, markExhausted, clearExhausted, listExhausted, MODEL_LADDER, liteMustNotOverwrite }
   = await import('../src/lib/modelRouter.js');
 const { classifyGeminiError } = await import('../src/lib/modelFallback.js');
 const { GeminiAPIError } = await import('../src/lib/gemini.js');
@@ -89,6 +89,13 @@ ok('500は梯子を降りない（要求側が原因のことがある）', clas
 ok('404はモデルIDが無い', classifyGeminiError(mk(404)) === 'missing-model');
 ok('401/400は諦める',
   classifyGeminiError(mk(401)) === 'fatal' && classifyGeminiError(mk(400)) === 'fatal');
+
+// ── 自動の作り直しで、lite が賢い層の結果を上書きしない ─────────
+const [smart0] = MODEL_LADDER.smart, [lite0] = MODEL_LADDER.lite;
+ok('lite の作り直しは賢い層の結果を上書きしない', liteMustNotOverwrite(lite0, smart0) === true);
+ok('賢い層どうしの作り直しは受け取る', liteMustNotOverwrite(MODEL_LADDER.smart[1], smart0) === false);
+ok('元も lite なら lite の作り直しを受け取る', liteMustNotOverwrite(lite0, MODEL_LADDER.lite[1]) === false);
+ok('元のモデルが分からない古い会話は受け取る', liteMustNotOverwrite(lite0, undefined) === false);
 
 console.log(bad ? `\n${bad}件 NG` : '\n✅ 梯子の振り分け・記録・エラーの見分けは健全');
 if (bad) process.exit(1);

@@ -32,6 +32,20 @@ export const MODEL_LADDER = {
   ],
 };
 
+/**
+ * 自動の作り直し（赤ブロック修正・動作チェック）の結果を、捨てて元を残すべきか。
+ *
+ * 賢い層が混雑・枠切れのとき、作り直しは lite に降りる。lite は見本を使いこなせず、
+ * 賢い層が作った良いブロックをまるごと出来の悪いものに置き換えてしまう
+ * （2026-11-23 実機：見本どおりの4スプライトが、別構成に替わった）。
+ * 元も lite が作ったもの（一日中 lite で動いている等）なら、直す価値があるので受け取る。
+ * 元のモデルが分からない（古い会話）ときも受け取る＝これまでどおり。
+ */
+export function liteMustNotOverwrite(newModel, originalModel) {
+  const isLite = m => MODEL_LADDER.lite.includes(m);
+  return isLite(newModel) && !!originalModel && !isLite(originalModel);
+}
+
 // 工程 → どの層を使うか
 export const JOB_LAYER = {
   plan: 'smart',      // 最初の1回。要望の分析＋ジャンル判定＋「決めること」リスト作成

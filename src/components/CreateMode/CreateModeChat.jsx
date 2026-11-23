@@ -4,6 +4,7 @@ import SpecSummary from './SpecSummary.jsx';
 import BlockDisplay from './BlockDisplay.jsx';
 import { parseCreateModeResponse, isReadableCreateModeResponse, GeminiAPIError, runGameQACheck } from '../../lib/gemini.js';
 import { callWithFallback } from '../../lib/modelFallback.js';
+import { liteMustNotOverwrite } from '../../lib/modelRouter.js';
 import { detectPassthroughBlocks, buildPassthroughMessage, detectPastedProgram, buildPasteChoiceMessage } from '../../lib/passthroughBlocks.js';
 import { checkBlockLogic } from '../../lib/blockLogicCheck.js';
 import { CREATE_MODE_SYSTEM_PROMPT } from '../../prompts/createModePrompt.js';
@@ -491,12 +492,19 @@ const CreateModeChat = ({ onOpenSettings }) => {
 
   // 再構築結果を最新のgeneratingメッセージに反映（準備ガイドmessageとspecは保持）
   // replaceAll=true のときは、それ以前の生成分を破棄して結果だけを残す（クリーン再構築）
-  const applyRebuildResult = useCallback((result, { replaceAll = false } = {}) => {
+  // automatic＝自動の作り直し（赤ブロック修正・動作チェック）。ユーザーが押した「まとめ直す」は false。
+  const applyRebuildResult = useCallback((result, { replaceAll = false, automatic = false } = {}) => {
     const lastGenerating = [...messagesRef.current]
       .reverse()
       .find(m => m.role === 'assistant' && m.parsed?.phase === 'generating');
     const originalMessage = lastGenerating?.parsed?.message;
     const originalSpec = lastGenerating?.parsed?.spec;
+
+    // 自動の作り直しが lite に降りたとき、賢い層の結果を上書きしない（理由は modelRouter.js）
+    if (automatic && liteMustNotOverwrite(result.model, lastGenerating?.model)) {
+      console.info('[keep]', result.model, 'の作り直しは採用せず、', lastGenerating.model, 'の結果を残す');
+      return false;
+    }
 
     setMessages(prev => {
       const idx = [...prev].map((m, i) => ({ m, i }))
@@ -507,6 +515,8 @@ const CreateModeChat = ({ onOpenSettings }) => {
       updated[idx] = {
         ...updated[idx],
         content: result.raw,
+        // いま画面にあるブロックを書いたモデル。次の自動の作り直しで上書きしてよいかの判断に使う
+        ...(result.model ? { model: result.model } : {}),
         parsed: {
           ...result.parsed,
           message: originalMessage || result.parsed.message,
@@ -517,6 +527,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
       };
       return updated;
     });
+    return true;
   }, []);
 
   // 現在の完成形に含まれるスプライト名（再構築リクエストでAIに全件返させるため）
@@ -600,7 +611,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
     try {
       const result = await callAPI(correctionText, null, messagesRef.current);
       if (result?.parsed?.phase === 'generating' && result.parsed.sprites) {
-        applyRebuildResult(result);
+        applyRebuildResult(result, { automatic: true });
         // 次のレンダリングで再チェックできるようfireフラグをリセット
         autoFixFiredRef.current = false;
       }
@@ -746,7 +757,7 @@ const CreateModeChat = ({ onOpenSettings }) => {
         `message には【Scratchで先に準備してください】ガイド（STEP5の形式）を必ず含めること。`;
       const result = await callAPI(correctionText, null, messagesRef.current);
       if (result?.parsed?.phase === 'generating' && result.parsed.sprites) {
-        applyRebuildResult(result, { replaceAll: renaming });
+        applyRebuildResult(result, { replaceAll: renaming, automatic: true });
       }
     } catch (err) {
       console.error('QA gate (rebuild) failed:', err);
