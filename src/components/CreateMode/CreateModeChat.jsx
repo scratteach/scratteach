@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import InputBar from '../Chat/InputBar.jsx';
 import SpecSummary from './SpecSummary.jsx';
 import BlockDisplay from './BlockDisplay.jsx';
-import { parseCreateModeResponse, GeminiAPIError, runGameQACheck } from '../../lib/gemini.js';
+import { parseCreateModeResponse, isReadableCreateModeResponse, GeminiAPIError, runGameQACheck } from '../../lib/gemini.js';
 import { callWithFallback } from '../../lib/modelFallback.js';
 import { detectPassthroughBlocks, buildPassthroughMessage, detectPastedProgram, buildPasteChoiceMessage } from '../../lib/passthroughBlocks.js';
 import { checkBlockLogic } from '../../lib/blockLogicCheck.js';
@@ -446,9 +446,9 @@ const CreateModeChat = ({ onOpenSettings }) => {
       ? ''
       : buildPlanSection(collectPlan(history), latestSpec(history));
 
-    const systemPrompt = [
+    const buildSystemPrompt = (withSample) => [
       CREATE_MODE_SYSTEM_PROMPT,
-      genre ? buildGenreGenerationAddendum(genre, { includeGoldenSample }) : '',
+      genre ? buildGenreGenerationAddendum(genre, { includeGoldenSample: withSample }) : '',
       planSection,
     ].filter(Boolean).join('\n\n');
 
@@ -456,15 +456,27 @@ const CreateModeChat = ({ onOpenSettings }) => {
     // ブロック生成・作り直しは賢い層、リストから1つ聞くだけの質問はlite層に振る。
     const job = includeGoldenSample ? 'generate' : (lastPhase ? 'ask' : 'plan');
 
+    const call = (jobName, withSample) => callWithFallback(historyForAPI, apiKey, {
+      job: jobName,
+      blockLang: 'ja',
+      systemPrompt: buildSystemPrompt(withSample),
+      validate: isReadableCreateModeResponse,
+      onWait: (sec) => setWaitNotice(`AIの順番待ちです（約${sec}秒）`),
+    });
+
     try {
-      const { text: raw, model: usedModel } = await callWithFallback(historyForAPI, apiKey, {
-        job,
-        blockLang: 'ja',
-        systemPrompt,
-        onWait: (sec) => setWaitNotice(`AIの順番待ちです（約${sec}秒）`),
-      });
+      let { text: raw, model: usedModel } = await call(job, includeGoldenSample);
+      let parsed = parseCreateModeResponse(raw);
+
+      // 質問のつもりで軽いモデルに回した回で、AIが summary を飛ばしてブロックを書き始めることがある
+      // （reviewing →「はい」→ generating。2026-11-23 実機）。そのブロックは見本も無く lite が
+      // 書いたもので、見本と違うスプライト構成になる。受け取らず、賢い層＋見本で作り直す。
+      if (parsed.phase === 'generating' && !includeGoldenSample) {
+        console.info('[regenerate]', usedModel, 'が質問の回でブロックを書いたので、見本つきで作り直す');
+        ({ text: raw, model: usedModel } = await call('generate', true));
+        parsed = parseCreateModeResponse(raw);
+      }
       setWaitNotice(null);
-      const parsed = parseCreateModeResponse(raw);
       return { raw, parsed, model: usedModel };
     } catch (err) {
       setWaitNotice(null);
