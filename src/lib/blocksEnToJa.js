@@ -165,12 +165,39 @@ function replaceDropdowns(line, table, userNames) {
   });
 }
 
-// stringify() の癖を落とす：行末の空白と、カスタムブロック呼び出しに付く「:: custom」。
+// stringify() の癖を落とす：行末の空白と、カスタムブロック呼び出しに付く「:: custom」、
+// 引数に付く「:: custom-arg」（行の途中にも付く）。
+// custom-arg を残すと、自作ブロックの案内に「はねる (高さ :: custom-arg)」と出て、子どもが
+// そのまま打ち込むと別のブロックになる。消しても描画は「定義」の行から引数だと判断して
+// ピンクで描くので困らない。むしろ残っていると、呼び出しの行が定義と噛み合わず赤になる。
 function tidy(text) {
   return text
     .split('\n')
-    .map(l => l.replace(/\s*::\s*custom(?:-arg)?\s*$/, '').replace(/\s+$/, ''))
+    .map(l => l
+      .replace(/\s*::\s*custom-arg\b/g, '')
+      .replace(/\s*::\s*custom\s*$/, '')
+      .replace(/\s+$/, ''))
     .join('\n');
+}
+
+// 自作ブロックの呼び出し（「count [a] <mouse down?>」）は、ライブラリの translate() が
+// 中に入らない。ブロックの番号（info.id）が無いと最初に return してしまい、
+// かっこの中を訳す処理まで届かないため（scratchblocks/syntax/model.js の `if (!id) return`）。
+// 名前は子どもの言葉なので訳さなくてよいが、かっこの中の普通のブロックは英語のまま残って
+// 赤ブロックになる。そこで、呼び出しを見つけたら、かっこの中のブロックだけを訳す。
+function translateCustomCallArgs(doc, lang) {
+  const visit = node => {
+    if (!node) return;
+    if (Array.isArray(node.blocks)) node.blocks.forEach(visit); // スクリプト（C型の中身も）
+    if (!node.isBlock) return;
+    const isCustomCall = node.info?.category === 'custom' && !node.info?.id;
+    for (const child of node.children || []) {
+      if (child.isLabel || child.isIcon) continue;
+      if (isCustomCall && child.isBlock) child.translate(lang);
+      visit(child);
+    }
+  };
+  doc.scripts.forEach(visit);
 }
 
 /**
@@ -192,6 +219,7 @@ export function translateBlocksToJa(englishText) {
   if (!englishText || !englishText.trim()) return englishText ?? '';
   const doc = parse(englishText, { languages: ['en', 'ja'] });
   doc.translate(allLanguages.ja);
+  translateCustomCallArgs(doc, allLanguages.ja);
   const text = tidy(doc.stringify());
   const userNames = collectUserNames(englishText + '\n' + text);
   return text
