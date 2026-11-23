@@ -9,22 +9,44 @@ import React from 'react';
 // 案内はAIに書かせず、生成されたブロックに「定義 」があるかどうかで機械的に出す。
 // 手順そのものはゲームの内容と関係なく毎回同じなので、固定の文章で正確に書ける。
 
-// blocks から「定義 〇〇」の行を拾う。引数（丸や角のかっこ）が付いているかも見る。
+// 中身に「動き・待ち」があるかを見分ける形（日本語のブロック表記）。
+// 「画面を再描画せずに実行する」に入れるべきかは、ブロックの中身で正反対になる：
+//   ・計算だけ（盤面を調べる・リストを作る）→ 入れる。入れないと繰り返しの1周ごとに
+//     画面を待つので、56マスを調べるだけで何秒もかかる（matchpuzzle 見本の必須条件）
+//   ・動き・待ちがある → 入れない。入れると一瞬で終わってアニメーションが見えない
+// 以前は「入れない」で固定していて、見本13個の定義（全部が計算だけ）と逆だった（2026-11-24）。
+const MOTION_RE = new RegExp([
+  '待つ', '秒で', '秒言う', '秒考える', '終わるまで', // 待つ・滑らかに動く・言う・音
+  '歩動かす', '度回す', '度に向ける', 'へ行く',
+  '^[xy]座標を', // 自分の座標を変える（変数「[x座標 v]」は [ で始まるので当たらない）
+  '^大きさを', 'の効果を', 'コスチューム', '^表示する$', '^隠す$',
+].join('|'));
+
+// blocks から「定義 〇〇」の行を拾う。引数（丸や角のかっこ）が付いているか、
+// 中身に動き・待ちがあるかも見る。中身＝次の空行か、次の「〜とき」「定義」まで。
 export function findCustomBlocks(sprites) {
   const found = [];
   for (const sp of sprites || []) {
-    for (const raw of String(sp.blocks || '').split('\n')) {
-      const m = raw.trim().match(/^定義\s+(.+)$/);
-      if (!m) continue;
+    const lines = String(sp.blocks || '').split('\n').map(l => l.trim());
+    lines.forEach((line, i) => {
+      const m = line.match(/^定義\s+(.+)$/);
+      if (!m) return;
       const label = m[1].trim();
+      const body = [];
+      for (let j = i + 1; j < lines.length; j++) {
+        const t = lines[j];
+        if (!t || /^定義\s/.test(t) || /とき$/.test(t)) break;
+        body.push(t);
+      }
       found.push({
         spriteName: sp.name,
         label,
         // 「定義 ジャンプする (高さ)」「定義 出す <条件>」のように引数が付いている形かどうか
         // 丸=数値/テキスト、角=同じ扱い、山=真偽値。どれか1つでも付いていれば引数あり
         hasArgs: /[([<]/.test(label),
+        animates: body.some(t => MOTION_RE.test(t)),
       });
-    }
+    });
   }
   return found;
 }
@@ -43,6 +65,9 @@ const CustomBlockGuide = ({ sprites }) => {
   if (!customBlocks.length) return null;
 
   const anyArgs = customBlocks.some(b => b.hasArgs);
+  const animating = customBlocks.filter(b => b.animates).length;
+  const warpAll = animating === 0;
+  const warpNone = animating === customBlocks.length;
 
   return (
     <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3">
@@ -66,6 +91,11 @@ const CustomBlockGuide = ({ sprites }) => {
             <li key={i}>
               <span className="font-mono font-medium">{b.label}</span>
               <span className="text-gray-500">　…「{b.spriteName}」スプライトの中で作る</span>
+              {!warpAll && !warpNone && (
+                <span className={b.animates ? 'text-gray-500' : 'text-rose-700 font-medium'}>
+                  {b.animates ? '　⬜ 再描画のチェックは入れない' : '　✅ 再描画のチェックを入れる'}
+                </span>
+              )}
             </li>
           ))}
         </ul>
@@ -92,8 +122,24 @@ const CustomBlockGuide = ({ sprites }) => {
           </Step>
         )}
         <Step n={4}>
-          <span className="font-medium">「画面を再描画せずに実行する」にはチェックを入れない</span>。
-          入れると中の動きが一瞬で終わってしまい、アニメーションが見えなくなります
+          {warpAll ? (
+            <>
+              <span className="font-medium">「画面を再描画せずに実行する」にチェックを入れる</span>。
+              中は計算だけなので一瞬で終わります。入れないと繰り返しのたびに画面の書きかえを待つので、
+              とても遅くなります
+            </>
+          ) : warpNone ? (
+            <>
+              <span className="font-medium">「画面を再描画せずに実行する」にはチェックを入れない</span>。
+              入れると中の動きが一瞬で終わってしまい、アニメーションが見えなくなります
+            </>
+          ) : (
+            <>
+              <span className="font-medium">「画面を再描画せずに実行する」は、ブロックによって違います</span>。
+              上の一覧の ✅（入れる）／⬜（入れない）のとおりにしてください。
+              計算だけのブロックは入れると速くなり、動きのあるブロックは入れると動きが見えなくなります
+            </>
+          )}
         </Step>
         <Step n={5}>
           <span className="font-medium">OK</span> を押すと、
