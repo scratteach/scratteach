@@ -151,9 +151,11 @@ function hasExplicitInstruction(text) {
 }
 
 // 明示指示つきの完成済みブロックなら描画用スプライトを返す。該当しなければ null。
-export function detectPassthroughBlocks(text) {
+// requireInstruction=false は、利用者が2択で「このまま表示する」を選んだあとにだけ使う
+// （そのときは明示の指示が無くても、本人が選んだので素通ししてよい）。
+export function detectPassthroughBlocks(text, { requireInstruction = true } = {}) {
   if (!text) return null;
-  if (!hasExplicitInstruction(text)) return null;
+  if (requireInstruction && !hasExplicitInstruction(text)) return null;
 
   const sprites = splitIntoSprites(text);
   if (!sprites.length) return null;
@@ -209,4 +211,31 @@ export function buildPassthroughMessage({ sprites, correctedLines, translated, n
     ? '\n\n■ 仕様のまとめ（貼っていただいたメモのまま）\n' + Object.entries(spec).map(([k, v]) => `・${k}：${v}`).join('\n')
     : '\n\n※ 貼っていただいたメモに【仕様】の欄が無いので、仕様のまとめは出していません。';
   return head + note + specText + prep;
+}
+
+// 指示なしで「完成したプログラム」が貼られたかを見る。当たったら、AIに送る前に
+// 「このまま表示する／これを元に作る」を本人に選んでもらう（勝手に素通しも作り直しもしない）。
+//
+// なぜ聞くのか：素通しのスイッチ（先頭の「変更せずに表示して」の1行）は説明文に見えるので、
+// 利用者は「プログラムに要らない行」と思って省く（実機で発生）。省くとAIが長い文章から
+// ゼロで組み直し、混雑も重なって数分「考え中」のまま止まって見えた。
+//
+// 誤発動を避けるため、スプライト見出しが1つ以上あることを条件にする
+// （仕様の説明に数行のブロックが混ざっているだけの文章では聞かない）。
+export function detectPastedProgram(text) {
+  if (!text || hasExplicitInstruction(text)) return null; // 明示指示つきは通常の素通しで扱う
+  const hasHeader = text.split('\n').some(l => SPRITE_HEADER.test(l.replace(/\s+$/, '')));
+  if (!hasHeader) return null;
+  const r = detectPassthroughBlocks(text, { requireInstruction: false });
+  return r ? { spriteNames: r.sprites.map(s => s.name) } : null;
+}
+
+export function buildPasteChoiceMessage({ spriteNames }) {
+  const names = spriteNames.map(n => `「${n}」`).join('・');
+  return [
+    `Scratchのプログラムが貼られました（スプライト${spriteNames.length}体：${names}）。どうしますか？`,
+    '',
+    '・このまま表示する … 1ブロックも書き換えずに、ブロックの絵にして表示します',
+    '・これを元に作る … このプログラムを土台にして、変えたいところを相談しながら作ります',
+  ].join('\n');
 }

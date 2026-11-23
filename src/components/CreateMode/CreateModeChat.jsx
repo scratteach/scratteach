@@ -4,7 +4,7 @@ import SpecSummary from './SpecSummary.jsx';
 import BlockDisplay from './BlockDisplay.jsx';
 import { parseCreateModeResponse, GeminiAPIError, runGameQACheck } from '../../lib/gemini.js';
 import { callWithFallback } from '../../lib/modelFallback.js';
-import { detectPassthroughBlocks, buildPassthroughMessage } from '../../lib/passthroughBlocks.js';
+import { detectPassthroughBlocks, buildPassthroughMessage, detectPastedProgram, buildPasteChoiceMessage } from '../../lib/passthroughBlocks.js';
 import { checkBlockLogic } from '../../lib/blockLogicCheck.js';
 import { CREATE_MODE_SYSTEM_PROMPT } from '../../prompts/createModePrompt.js';
 import { detectGenre, buildGenreGenerationAddendum, buildGenreQARubric } from '../../prompts/genreTemplates.js';
@@ -75,7 +75,7 @@ const UserBubble = ({ message }) => (
   </div>
 );
 
-const AIBubble = ({ message, isLatest, isLastGenerating, onApprove, onModify, gameTitle, isDesktop, onInvalidBlocks, onRebuild, onExportAll, isRebuilding, mergedSprites, mergedSpec, planProgress }) => {
+const AIBubble = ({ message, isLatest, isLastGenerating, onApprove, onModify, gameTitle, isDesktop, onInvalidBlocks, onRebuild, onExportAll, isRebuilding, mergedSprites, mergedSpec, planProgress, onPasteShow, onPasteBuild }) => {
   const parsed = message.parsed || {};
   const { phase, message: msg, question, spec } = parsed;
 
@@ -153,7 +153,29 @@ const AIBubble = ({ message, isLatest, isLastGenerating, onApprove, onModify, ga
           </>
         )}
 
-        {!phase && (
+        {parsed.pasteChoice && (
+          <div className="bg-sky-50 border border-sky-200 rounded-2xl rounded-tl-sm p-4">
+            <div className="text-sm leading-relaxed text-gray-800 mb-3">{formatText(msg)}</div>
+            {isLatest && (
+              <div className="flex gap-2 pt-2 border-t border-sky-200">
+                <button
+                  onClick={() => onPasteShow?.(parsed.pastedText)}
+                  className="flex-1 bg-sky-400 hover:bg-sky-500 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-colors"
+                >
+                  このまま表示する
+                </button>
+                <button
+                  onClick={() => onPasteBuild?.()}
+                  className="flex-1 bg-white hover:bg-gray-50 text-gray-600 text-sm font-medium px-4 py-2.5 rounded-xl border border-gray-200 transition-colors"
+                >
+                  これを元に作る
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {!phase && !parsed.pasteChoice && (
           <div className="bg-white border border-gray-200 rounded-2xl rounded-tl-sm px-4 py-3 text-sm leading-relaxed text-gray-800">
             {formatText(message.content)}
           </div>
@@ -721,7 +743,31 @@ const CreateModeChat = ({ onOpenSettings }) => {
     }
   }, [callAPI, applyRebuildResult, isPassthroughActive]);
 
-  const handleSend = useCallback(async (text, imageData) => {
+  // 素通し表示の吹き出しを足す（明示指示つきの貼り付けと、2択で「このまま表示する」を選んだときの共通処理）
+  const presentPassthrough = useCallback(async (passthrough, currentSessionId) => {
+    passthroughRef.current = true;
+    const parsed = {
+      phase: 'generating',
+      message: buildPassthroughMessage(passthrough),
+      question: null,
+      spec: passthrough.spec, // 貼り元の【仕様】欄（無ければ null）。PDFの「決定した仕様」に出る
+      sprites: passthrough.sprites,
+      passthrough: true, // リロードで復元しても素通しだと分かるように保存する
+    };
+    const aiMessage = {
+      role: 'assistant',
+      content: parsed.message,
+      parsed,
+      timestamp: new Date().toISOString(),
+    };
+    setMessages(prev => [...prev, aiMessage]);
+    if (currentSessionId) {
+      await addMessageToDB(currentSessionId, aiMessage);
+      await updateSessionSprites(currentSessionId, parsed.sprites);
+    }
+  }, [addMessageToDB, updateSessionSprites]);
+
+  const handleSend = useCallback(async (text, imageData, { skipPasteCheck = false } = {}) => {
     if ((!text && !imageData) || isLoading) return;
 
     // ユーザーが新しいメッセージを送ったら自動修正・QAカウンターをリセット
@@ -763,27 +809,24 @@ const CreateModeChat = ({ onOpenSettings }) => {
       // AIを通さずそのまま描画する（作り直しで置換・脱落が起きるのを経路ごと防ぐ）。
       const passthrough = detectPassthroughBlocks(text);
       if (passthrough) {
-        passthroughRef.current = true;
-        const parsed = {
-          phase: 'generating',
-          message: buildPassthroughMessage(passthrough),
-          question: null,
-          spec: passthrough.spec, // 貼り元の【仕様】欄（無ければ null）。PDFの「決定した仕様」に出る
-          sprites: passthrough.sprites,
-          passthrough: true, // リロードで復元しても素通しだと分かるように保存する
-        };
+        await presentPassthrough(passthrough, currentSessionId);
+        return; // QAゲートも通さない（採点結果でブロックを作り直させないため）
+      }
+
+      // 指示なしで完成したプログラムが貼られたら、AIに送る前に本人に選んでもらう。
+      // phase は付けない（付けると「これを元に作る」の後の工程が質問用の軽いモデルに振られる）。
+      const pasted = !imageData && !skipPasteCheck ? detectPastedProgram(text) : null;
+      if (pasted) {
+        const message = buildPasteChoiceMessage(pasted);
         const aiMessage = {
           role: 'assistant',
-          content: parsed.message,
-          parsed,
+          content: message,
+          parsed: { pasteChoice: true, message, pastedText: text }, // リロード後もボタンが使えるよう本文を持つ
           timestamp: new Date().toISOString(),
         };
         setMessages(prev => [...prev, aiMessage]);
-        if (currentSessionId) {
-          await addMessageToDB(currentSessionId, aiMessage);
-          await updateSessionSprites(currentSessionId, parsed.sprites);
-        }
-        return; // QAゲートも通さない（採点結果でブロックを作り直させないため）
+        if (currentSessionId) await addMessageToDB(currentSessionId, aiMessage);
+        return;
       }
 
       const result = await callAPI(text, imageData, currentMessages);
@@ -820,7 +863,24 @@ const CreateModeChat = ({ onOpenSettings }) => {
     } finally {
       setIsLoading(false);
     }
-  }, [messages, isLoading, sessionId, startNewSession, addMessageToDB, callAPI, updateSessionSpec, updateSessionSprites, runQAGate]);
+  }, [messages, isLoading, sessionId, startNewSession, addMessageToDB, callAPI, updateSessionSpec, updateSessionSprites, runQAGate, presentPassthrough]);
+
+  // 2択「このまま表示する」：本人が選んだので、明示指示が無くても素通しする
+  const handlePasteShow = useCallback(async (pastedText) => {
+    if (isLoading) return;
+    const passthrough = detectPassthroughBlocks(pastedText, { requireInstruction: false });
+    if (!passthrough) return;
+    const userMessage = { role: 'user', content: 'このまま表示する', timestamp: new Date().toISOString() };
+    setMessages(prev => [...prev, userMessage]);
+    if (sessionId) await addMessageToDB(sessionId, userMessage);
+    await presentPassthrough(passthrough, sessionId);
+  }, [isLoading, sessionId, addMessageToDB, presentPassthrough]);
+
+  // 2択「これを元に作る」：貼ったプログラムは履歴に入っているので、それを土台にAIと相談する。
+  // （プログラムから仕様を読み取って聞く流れは次の段で入れる。今はこれまでどおりAIに渡す）
+  const handlePasteBuild = useCallback(() => {
+    handleSend('これを元に作りたいです。上に貼ったプログラムを土台にしてください。', null, { skipPasteCheck: true });
+  }, [handleSend]);
 
   const handleApprove = useCallback(() => {
     handleSend('はい、作って！', null);
@@ -913,6 +973,8 @@ const CreateModeChat = ({ onOpenSettings }) => {
                       onRebuild={handleManualRebuild}
                       onExportAll={handleExportAll}
                       isRebuilding={isAutoFixing}
+                      onPasteShow={handlePasteShow}
+                      onPasteBuild={handlePasteBuild}
                     />
               ))}
               {isLoading && <LoadingDots isChecking={isChecking} />}
