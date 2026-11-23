@@ -63,6 +63,7 @@ export function classifyGeminiError(err) {
  */
 export async function callWithFallback(messages, apiKey, {
   job = 'ask', blockLang = 'ja', systemPrompt = null, onWait = null, onModel = null,
+  validate = null,
 } = {}) {
   const { primary, demotion } = planModels(job);
   const rpmHit = [];
@@ -76,6 +77,13 @@ export async function callWithFallback(messages, apiKey, {
       for (;;) {
         try {
           const text = await callGemini(messages, apiKey, model, blockLang, systemPrompt);
+          // 形が壊れた返事（読めない JSON など）は通ったことにしない。混雑と同じく投げ直す。
+          if (validate && !validate(text)) {
+            console.info('[invalid]', model, text.length, JSON.stringify(text.slice(-40)));
+            throw new GeminiAPIError(
+              'AIの返事が途中で切れました。もう一度送ってください。', 0, 'INVALID_RESPONSE'
+            );
+          }
           if (onModel) onModel(model);
           return { text, model };
         } catch (err) {

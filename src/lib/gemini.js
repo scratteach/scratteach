@@ -231,6 +231,15 @@ const translateSprites = (parsed) => {
   };
 };
 
+// JSON で書き始めたのに読めない返事＝途中で切れている。そのまま画面に出すと
+// 「```json {"phase":...」が見えてしまうので、受け取らずに投げ直す。
+// JSON で始まらないただの文章は、これまでどおり受け取る（下の catch で会話文として出す）。
+export const isReadableCreateModeResponse = (text) => {
+  const clean = (text || '').replace(/^```json\s*|\s*```$/g, '').trim();
+  if (!clean.startsWith('{')) return true;
+  try { JSON.parse(clean); return true; } catch { return false; }
+};
+
 export const parseCreateModeResponse = (text) => {
   try {
     const clean = text.replace(/^```json\s*|\s*```$/g, '').trim();
@@ -446,6 +455,26 @@ export const callGemini = async (messages, apiKey, model, blockLang = 'ja', syst
     );
   }
 
-  const rawText = data.candidates[0].content.parts[0].text;
+  // 返事は複数の parts に分かれて届くことがある。parts[0] だけ読むと、
+  // 「{"phase」で終わる・途中で切れた JSON がそのまま画面に出る（2026-11-23 実機）。
+  // 考えの部分（thought）を除いた本文をすべてつなぐ。
+  const candidate = data.candidates[0];
+  const rawText = (candidate.content?.parts || [])
+    .filter(p => !p.thought && typeof p.text === 'string')
+    .map(p => p.text)
+    .join('');
+
+  // STOP 以外（MAX_TOKENS・SAFETY・OTHER など）は返事が最後まで来ていない。
+  // 途中の文章を正解として扱わず、投げ直しの対象にする（status 0 は梯子で「混雑」扱い）。
+  const finish = candidate.finishReason;
+  if (!rawText.trim() || (finish && finish !== 'STOP')) {
+    console.info('[incomplete]', model, finish, rawText.length);
+    throw new GeminiAPIError(
+      'AIの返事が途中で切れました。もう一度送ってください。',
+      0,
+      'INCOMPLETE_RESPONSE',
+      { finishReason: finish || null }
+    );
+  }
   return rawText;
 };
